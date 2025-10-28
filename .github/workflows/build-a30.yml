@@ -1,255 +1,185 @@
-name: GMLoader-Next Build for Miyoo A30
+name: GMLoader-Next for A30 (usando toolchain A30)
 on:
   workflow_dispatch:
   push:
     branches: [ "master", "main" ]
-    paths-ignore:
-      - '**/README.md'
-  pull_request:
-    branches: [ "master", "main" ]
-    paths-ignore:
-      - '**/README.md'
 
 jobs:
-  build-a30:
+  build-with-a30-toolchain:
     runs-on: ubuntu-latest
-    container:
-      image: debian:bullseye
-    name: Miyoo A30 (ARM Cortex-A7)
     
     steps:
-      - name: Install armhf dependencies for A30
-        run: |
-          dpkg --add-architecture armhf
-          apt update
-          apt install -y --no-install-recommends \
-            python3 \
-            git \
-            dpkg-dev \
-            build-essential \
-            binutils \
-            python3-clang \
-            binutils-arm-linux-gnueabihf \
-            libstdc++-10-dev-armhf-cross \
-            linux-libc-dev-armhf-cross \
-            make \
-            gcc-arm-linux-gnueabihf \
-            g++-arm-linux-gnueabihf \
-            libsdl2-dev:armhf \
-            libzip-dev:armhf \
-            ca-certificates \
-            file
-      
       - name: Checkout GMLoader-Next
         uses: actions/checkout@v4
         with:
+          repository: JohnnyonFlame/gmloader-next
           submodules: recursive
       
-      - name: Build for Miyoo A30 (Cortex-A7 optimized)
+      - name: Setup Docker
         run: |
-          make -f Makefile.gmloader \
-            ARCH=arm-linux-gnueabihf \
-            OPTM="-O3 -march=armv7-a -mtune=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard" \
-            LLVM_FILE=/usr/lib/llvm-11/lib/libclang-11.so.1 \
-            LLVM_INC=/usr/arm-linux-gnueabihf/include/c++/10/arm-linux-gnueabihf \
-            USE_FMOD=0 \
-            -j$(nproc)
+          sudo apt-get update
+          sudo apt-get install -y docker.io
       
-      - name: Verify build
+      - name: Clone A30 Toolchain
         run: |
-          if [ -f "build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf" ]; then
-            echo "✓ Build successful for Miyoo A30!"
-            ls -lh build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf
-            echo ""
-            echo "Binary info:"
-            file build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf || echo "file command not available"
-            echo ""
-            echo "Size: $(stat -c%s build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf) bytes"
+          git clone https://codeberg.org/hydrogen18/miyooa30 --depth=1
+      
+      - name: Build A30 Toolchain Docker
+        run: |
+          cd miyooa30/dockerbuild
+          ./build.sh
+      
+      - name: Prepare GMLoader build
+        run: |
+          # Criar zipconf.h
+          mkdir -p 3rdparty/libzip-config
+          cat > 3rdparty/libzip-config/zipconf.h << 'EOF'
+          #ifndef HAD_ZIPCONF_H
+          #define HAD_ZIPCONF_H
+          #define ZIP_EXTERN extern
+          #define LIBZIP_VERSION "1.7.3"
+          #include <stdint.h>
+          typedef int64_t zip_int64_t;
+          typedef uint64_t zip_uint64_t;
+          typedef int32_t zip_int32_t;
+          typedef uint32_t zip_uint32_t;
+          typedef int16_t zip_int16_t;
+          typedef uint16_t zip_uint16_t;
+          typedef int8_t zip_int8_t;
+          typedef uint8_t zip_uint8_t;
+          #endif
+          EOF
+          
+          # Script de build dentro do container
+          cat > build-in-container.sh << 'BUILDSCRIPT'
+          #!/bin/bash
+          set -e
+          
+          cd /build
+          
+          # Instalar dependências
+          apt-get update -qq
+          apt-get install -y cmake python3-pip libclang-dev llvm zlib1g-dev -qq || true
+          pip3 install libclang || true
+          
+          # Submódulos
+          git config --global --add safe.directory /build
+          git submodule update --init --recursive || true
+          
+          # Criar stubs libc se generate_libc falhar
+          mkdir -p build/arm-linux-gnueabihf/thunks/libc
+          touch build/arm-linux-gnueabihf/thunks/libc/impl_header.h
+          touch build/arm-linux-gnueabihf/thunks/libc/impl_tab.h
+          
+          # Tentar gerar libc
+          python3 scripts/generate_libc.py arm-linux-gnueabihf \
+              --llvm-includes /usr/arm-linux-gnueabihf/include 2>/dev/null || true
+          
+          # Compilar com flags compatíveis com GLIBC antiga
+          make -f Makefile.gmloader \
+              ARCH=arm-linux-gnueabihf \
+              OPTM="-O2 -march=armv7-a -mtune=cortex-a7 -mfpu=neon -mfloat-abi=hard" \
+              USE_FMOD=0 \
+              SDL_CFLAGS="" \
+              SDL_LDFLAGS="-lSDL2" \
+              -j$(nproc)
+          
+          # Verificar
+          if [ -f "gmloadernext.arm-linux-gnueabihf" ]; then
+              echo "✓ Build OK!"
+              cp gmloadernext.arm-linux-gnueabihf /output/
           else
-            echo "✗ Build failed - binary not found"
-            ls -la build/arm-linux-gnueabihf/gmloader/ 2>/dev/null || echo "Build directory doesn't exist"
+              echo "✗ Build falhou"
+              exit 1
+          fi
+          BUILDSCRIPT
+          
+          chmod +x build-in-container.sh
+      
+      - name: Build with A30 Toolchain
+        run: |
+          mkdir -p output
+          docker run --rm \
+            -v $(pwd):/build \
+            -v $(pwd)/output:/output \
+            miyooa30-toolchain \
+            bash /build/build-in-container.sh
+      
+      - name: Verify and Package
+        run: |
+          if [ ! -f "output/gmloadernext.arm-linux-gnueabihf" ]; then
+            echo "Binário não foi gerado!"
             exit 1
           fi
-      
-      - name: Prepare A30 package
-        run: |
+          
+          echo "✓ Binário compilado com toolchain do A30!"
+          ls -lh output/gmloadernext.arm-linux-gnueabihf
+          
+          # Preparar pacote
           mkdir -p a30_package/lib
+          cp output/gmloadernext.arm-linux-gnueabihf a30_package/gmloadernext.armhf
+          chmod +x a30_package/gmloadernext.armhf
           
-          # Copiar binário (mantém nome original + cria cópia renomeada)
-          cp build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf a30_package/
-          cp build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf a30_package/gmloadernext.arm-linux-gnueabihf
-          chmod +x a30_package/gmloadernext.*
+          # Copiar libs redist
+          cp -r lib/redist/* a30_package/lib/ 2>/dev/null || true
           
-          # Copiar bibliotecas redist
-          if [ -d "lib/redist" ]; then
-            cp -r lib/redist/* a30_package/lib/ 2>/dev/null || true
-          fi
-          
-          # Criar configuração JSON
+          # Config
           cat > a30_package/gmloader.json << 'EOF'
           {
             "save_dir": "saves",
             "apk_path": "your_game.apk",
             "show_cursor": false,
             "disable_controller": false,
-            "disable_joystick": false,
-            "disable_rumble": false,
             "force_platform": "os_android"
           }
           EOF
           
-          # Criar script de lançamento
+          # Script
           cat > a30_package/gmloader.sh << 'EOF'
           #!/bin/sh
-          # GMLoader launcher for Miyoo A30
-          cd $(dirname "$0")
+          LOG="/mnt/SDCARD/Roms/PORTS/gmloader/gmloader.log"
+          
+          cd /mnt/SDCARD/Roms/PORTS/gmloader
+          
+          echo "=== GMLoader ===" > "$LOG"
+          echo "Iniciando..." >> "$LOG"
+          
           export LD_LIBRARY_PATH=./lib:$LD_LIBRARY_PATH
           
-          # Tentar ambos os nomes do binário
-          if [ -f "./gmloadernext.arm-linux-gnueabihf" ]; then
-              ./gmloadernext.arm-linux-gnueabihf -c gmloader.json
-          elif [ -f "./gmloadernext.armhf" ]; then
-              ./gmloadernext.armhf -c gmloader.json
-          else
-              echo "ERROR: GMLoader binary not found!"
-              exit 1
-          fi
+          ./gmloadernext.armhf -c gmloader.json >> "$LOG" 2>&1
+          
+          echo "Finalizado: $?" >> "$LOG"
           EOF
           chmod +x a30_package/gmloader.sh
           
-          # Criar README detalhado
+          # README
           cat > a30_package/README.txt << 'EOF'
-          ╔═══════════════════════════════════════════════════════════╗
-          ║         GMLoader-Next for Miyoo A30                       ║
-          ║         Cortex-A7 Optimized Build                         ║
-          ╚═══════════════════════════════════════════════════════════╝
+          GMLoader-Next for Miyoo A30
+          ============================
           
-          WHAT IS THIS?
-          ───────────────────────────────────────────────────────────
-          GMLoader allows you to run GameMaker Studio games (exported
-          as Android APKs) on your Miyoo A30 handheld.
+          Compilado com o toolchain OFICIAL do A30!
+          Compatível com GLIBC 2.23 (do A30).
           
-          This build is specifically optimized for the A30's ARM
-          Cortex-A7 processor for best performance.
+          Instalação:
+          1. Copiar pasta para: /mnt/SDCARD/Roms/PORTS/gmloader/
+          2. Copiar gmloader.sh para: /mnt/SDCARD/Roms/PORTS/
+          3. Colocar APK do jogo
+          4. Editar gmloader.json
+          5. Rodar!
           
-          INSTALLATION ON A30:
-          ───────────────────────────────────────────────────────────
-          1. Copy this entire folder to your A30 SD card:
-             /mnt/SDCARD/Roms/PORTS/gmloader/
-          
-          2. Copy the launcher script to:
-             /mnt/SDCARD/Roms/PORTS/gmloader.sh
-          
-          3. Place your GameMaker game APK in this folder
-          
-          4. Edit gmloader.json:
-             - Change "your_game.apk" to your APK filename
-             - Adjust other settings if needed
-          
-          5. On your A30:
-             Games → PORTS → gmloader
-          
-          GETTING GAMEMAKER APKs:
-          ───────────────────────────────────────────────────────────
-          For your own games:
-          - Export from GameMaker Studio as Android APK
-          - Target: ARMv7 (32-bit)
-          - Use YYC for best performance
-          
-          For commercial games:
-          - Purchase game on Google Play
-          - Extract APK using tools like APK Extractor
-          - Only for games you legally own!
-          
-          RECOMMENDED GAMES:
-          ───────────────────────────────────────────────────────────
-          ✓ Undertale
-          ✓ Deltarune Chapter 1 & 2
-          ✓ Nuclear Throne
-          ✓ Hotline Miami
-          ✓ Hyper Light Drifter
-          ✓ 2D pixel art / retro games
-          ✓ Your own GameMaker Studio 1.x/2.x games!
-          
-          PERFORMANCE TIPS:
-          ───────────────────────────────────────────────────────────
-          The A30 has limited hardware (512MB RAM, 1.2GHz CPU):
-          
-          ✓ Works best: 2D pixel art, simple graphics
-          ✗ Struggles with: 3D games, heavy particles, shaders
-          
-          If game runs slowly:
-          - Lower resolution in gmloader.json
-          - Disable effects if game allows
-          - Try overclocking A30 (if supported by firmware)
-          
-          TROUBLESHOOTING:
-          ───────────────────────────────────────────────────────────
-          Game doesn't start:
-          → Wait 30-60 seconds (first load is slow)
-          → Check APK is GameMaker (not Unity/Godot)
-          → Try a simpler game first
-          
-          Controls don't work:
-          → Edit gmloader.json: "disable_controller": true
-          → Or: "disable_joystick": true
-          
-          Crashes immediately:
-          → APK may not be compatible
-          → Try different GMS version
-          → Check if APK is corrupted
-          
-          Black screen:
-          → Game may be loading (wait longer)
-          → Check save_dir has write permissions
-          
-          CONFIGURATION (gmloader.json):
-          ───────────────────────────────────────────────────────────
-          apk_path: Your game APK filename
-          save_dir: Where to store saves
-          show_cursor: true/false
-          disable_controller: Set true if controls don't work
-          disable_joystick: Set true for D-pad only
-          force_platform: Keep as "os_android"
-          
-          TECHNICAL INFO:
-          ───────────────────────────────────────────────────────────
-          Build flags: -O3 -march=armv7-a -mtune=cortex-a7
-                      -mfpu=neon-vfpv4 -mfloat-abi=hard
-          Target: ARM 32-bit (armhf)
-          Compatible: Miyoo A30, similar ARM Cortex-A7 devices
-          
-          SUPPORT:
-          ───────────────────────────────────────────────────────────
-          For GMLoader issues:
-          https://github.com/JohnnyonFlame/gmloader-next
-          
-          For A30-specific help:
-          Check Miyoo A30 community forums
-          
-          Enjoy your games! 🎮
+          Log: gmloader.log (na pasta)
           EOF
           
-          # Criar pacote compactado
+          # Tar
           cd a30_package
-          tar -czf ../gmloader-miyoo-a30.tar.gz *
+          tar -czf ../gmloader-a30-compatible.tar.gz *
           cd ..
       
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: gmloadernext_miyoo_a30
+          name: gmloader_a30_toolchain_build
           path: |
-            build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf
-            gmloader-miyoo-a30.tar.gz
+            output/gmloadernext.arm-linux-gnueabihf
+            gmloader-a30-compatible.tar.gz
             a30_package/
-      
-      - name: Create Release (on tag)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            gmloader-miyoo-a30.tar.gz
-            build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
