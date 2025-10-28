@@ -12,70 +12,40 @@ on:
 
 jobs:
   build-a30:
-    runs-on: ubuntu-latest   # pode ser 24.04; o passo abaixo ajeita as fontes pra armhf
+    runs-on: ubuntu-latest
+    container:
+      image: debian:bullseye
     name: Miyoo A30 (ARM Cortex-A7)
-
+    
     steps:
+      - name: Install armhf dependencies for A30
+        run: |
+          dpkg --add-architecture armhf
+          apt update
+          apt install -y --no-install-recommends \
+            python3 \
+            git \
+            dpkg-dev \
+            build-essential \
+            binutils \
+            python3-clang \
+            binutils-arm-linux-gnueabihf \
+            libstdc++-10-dev-armhf-cross \
+            linux-libc-dev-armhf-cross \
+            make \
+            gcc-arm-linux-gnueabihf \
+            g++-arm-linux-gnueabihf \
+            libsdl2-dev:armhf \
+            libzip-dev:armhf \
+            ca-certificates
+      
       - name: Checkout GMLoader-Next
         uses: actions/checkout@v4
         with:
-          repository: JohnnyonFlame/gmloader-next
           submodules: recursive
-
-      - name: Prepare apt for armhf on noble (fix 404s)
+      
+      - name: Build for Miyoo A30 (Cortex-A7 optimized)
         run: |
-          set -euo pipefail
-
-          # habilita multiarch primeiro
-          sudo dpkg --add-architecture armhf || true
-
-          # 1) marca as entradas "noble" existentes para só buscar amd64 nelas,
-          #    evitando que apt consulte security.ubuntu.com por armhf (causa 404).
-          #    Faz backup (.bak) por segurança.
-          sudo grep -q "noble" /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || true
-          sudo bash -c '
-          for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
-            [ -f "$f" ] || continue
-            # só tocar linhas que contenham "noble" (24.04) e que sejam "deb"
-            sudo sed -E -i.bak "/^deb .*noble/{
-              /\\[arch=/! s#^deb #deb [arch=amd64] #
-            }" "$f" || true
-          done
-          '
-
-          # 2) adicionar repositório ports para armhf (onde os pacotes armhf existem)
-          cat <<'EOF' | sudo tee /etc/apt/sources.list.d/ubuntu-ports-armhf.list
-          deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse
-          deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse
-          deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse
-          deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports noble-backports main restricted universe multiverse
-          EOF
-
-          # (Opcional) confiança nas chaves — normalmente o keyring padrão já serve,
-          # mas em casos estranhos pode ser preciso instalar ubuntu-keyring:
-          sudo apt-get update -y || true
-
-      - name: Install base dependencies + cross libs (amd64 + armhf)
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            git \
-            build-essential \
-            python3 \
-            python3-clang \
-            gcc-arm-linux-gnueabihf \
-            g++-arm-linux-gnueabihf \
-            binutils-arm-linux-gnueabihf \
-            libstdc++-10-dev-armhf-cross \
-            ca-certificates \
-            libsdl2-dev:armhf \
-            libzip-dev:armhf \
-            zlib1g-dev:armhf
-
-      - name: Build for Miyoo A30
-        run: |
-          set -euo pipefail
           make -f Makefile.gmloader \
             ARCH=arm-linux-gnueabihf \
             OPTM="-O3 -march=armv7-a -mtune=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard" \
@@ -83,28 +53,34 @@ jobs:
             LLVM_INC=/usr/arm-linux-gnueabihf/include/c++/10/arm-linux-gnueabihf \
             USE_FMOD=0 \
             -j$(nproc)
-
+      
       - name: Verify build
         run: |
           if [ -f "build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf" ]; then
-            echo "✓ Build successful!"
+            echo "✓ Build successful for Miyoo A30!"
             file build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf
             ls -lh build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf
           else
             echo "✗ Build failed - binary not found"
-            ls -la build/arm-linux-gnueabihf/gmloader/ || echo "Build directory not found"
+            ls -la build/arm-linux-gnueabihf/gmloader/ 2>/dev/null || echo "Build directory doesn't exist"
             exit 1
           fi
-
+      
       - name: Prepare A30 package
         run: |
-          set -euo pipefail
           mkdir -p a30_package/lib
+          
+          # Copiar binário (mantém nome original + cria cópia renomeada)
+          cp build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf a30_package/
           cp build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf a30_package/gmloadernext.arm-linux-gnueabihf
-          chmod +x a30_package/gmloadernext.arm-linux-gnueabihf
+          chmod +x a30_package/gmloadernext.*
+          
+          # Copiar bibliotecas redist
           if [ -d "lib/redist" ]; then
             cp -r lib/redist/* a30_package/lib/ 2>/dev/null || true
           fi
+          
+          # Criar configuração JSON
           cat > a30_package/gmloader.json << 'EOF'
           {
             "save_dir": "saves",
@@ -112,20 +88,148 @@ jobs:
             "show_cursor": false,
             "disable_controller": false,
             "disable_joystick": false,
+            "disable_rumble": false,
             "force_platform": "os_android"
           }
           EOF
+          
+          # Criar script de lançamento
           cat > a30_package/gmloader.sh << 'EOF'
           #!/bin/sh
+          # GMLoader launcher for Miyoo A30
           cd $(dirname "$0")
           export LD_LIBRARY_PATH=./lib:$LD_LIBRARY_PATH
-          ./gmloadernext.arm-linux-gnueabihf -c gmloader.json
+          
+          # Tentar ambos os nomes do binário
+          if [ -f "./gmloadernext.arm-linux-gnueabihf" ]; then
+              ./gmloadernext.arm-linux-gnueabihf -c gmloader.json
+          elif [ -f "./gmloadernext.armhf" ]; then
+              ./gmloadernext.armhf -c gmloader.json
+          else
+              echo "ERROR: GMLoader binary not found!"
+              exit 1
+          fi
           EOF
           chmod +x a30_package/gmloader.sh
+          
+          # Criar README detalhado
+          cat > a30_package/README.txt << 'EOF'
+          ╔═══════════════════════════════════════════════════════════╗
+          ║         GMLoader-Next for Miyoo A30                       ║
+          ║         Cortex-A7 Optimized Build                         ║
+          ╚═══════════════════════════════════════════════════════════╝
+          
+          WHAT IS THIS?
+          ───────────────────────────────────────────────────────────
+          GMLoader allows you to run GameMaker Studio games (exported
+          as Android APKs) on your Miyoo A30 handheld.
+          
+          This build is specifically optimized for the A30's ARM
+          Cortex-A7 processor for best performance.
+          
+          INSTALLATION ON A30:
+          ───────────────────────────────────────────────────────────
+          1. Copy this entire folder to your A30 SD card:
+             /mnt/SDCARD/Roms/PORTS/gmloader/
+          
+          2. Copy the launcher script to:
+             /mnt/SDCARD/Roms/PORTS/gmloader.sh
+          
+          3. Place your GameMaker game APK in this folder
+          
+          4. Edit gmloader.json:
+             - Change "your_game.apk" to your APK filename
+             - Adjust other settings if needed
+          
+          5. On your A30:
+             Games → PORTS → gmloader
+          
+          GETTING GAMEMAKER APKs:
+          ───────────────────────────────────────────────────────────
+          For your own games:
+          - Export from GameMaker Studio as Android APK
+          - Target: ARMv7 (32-bit)
+          - Use YYC for best performance
+          
+          For commercial games:
+          - Purchase game on Google Play
+          - Extract APK using tools like APK Extractor
+          - Only for games you legally own!
+          
+          RECOMMENDED GAMES:
+          ───────────────────────────────────────────────────────────
+          ✓ Undertale
+          ✓ Deltarune Chapter 1 & 2
+          ✓ Nuclear Throne
+          ✓ Hotline Miami
+          ✓ Hyper Light Drifter
+          ✓ 2D pixel art / retro games
+          ✓ Your own GameMaker Studio 1.x/2.x games!
+          
+          PERFORMANCE TIPS:
+          ───────────────────────────────────────────────────────────
+          The A30 has limited hardware (512MB RAM, 1.2GHz CPU):
+          
+          ✓ Works best: 2D pixel art, simple graphics
+          ✗ Struggles with: 3D games, heavy particles, shaders
+          
+          If game runs slowly:
+          - Lower resolution in gmloader.json
+          - Disable effects if game allows
+          - Try overclocking A30 (if supported by firmware)
+          
+          TROUBLESHOOTING:
+          ───────────────────────────────────────────────────────────
+          Game doesn't start:
+          → Wait 30-60 seconds (first load is slow)
+          → Check APK is GameMaker (not Unity/Godot)
+          → Try a simpler game first
+          
+          Controls don't work:
+          → Edit gmloader.json: "disable_controller": true
+          → Or: "disable_joystick": true
+          
+          Crashes immediately:
+          → APK may not be compatible
+          → Try different GMS version
+          → Check if APK is corrupted
+          
+          Black screen:
+          → Game may be loading (wait longer)
+          → Check save_dir has write permissions
+          
+          CONFIGURATION (gmloader.json):
+          ───────────────────────────────────────────────────────────
+          apk_path: Your game APK filename
+          save_dir: Where to store saves
+          show_cursor: true/false
+          disable_controller: Set true if controls don't work
+          disable_joystick: Set true for D-pad only
+          force_platform: Keep as "os_android"
+          
+          TECHNICAL INFO:
+          ───────────────────────────────────────────────────────────
+          Build flags: -O3 -march=armv7-a -mtune=cortex-a7
+                      -mfpu=neon-vfpv4 -mfloat-abi=hard
+          Target: ARM 32-bit (armhf)
+          Compatible: Miyoo A30, similar ARM Cortex-A7 devices
+          
+          SUPPORT:
+          ───────────────────────────────────────────────────────────
+          For GMLoader issues:
+          https://github.com/JohnnyonFlame/gmloader-next
+          
+          For A30-specific help:
+          Check Miyoo A30 community forums
+          
+          Enjoy your games! 🎮
+          EOF
+          
+          # Criar pacote compactado
           cd a30_package
           tar -czf ../gmloader-miyoo-a30.tar.gz *
           cd ..
-
+      
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -134,8 +238,8 @@ jobs:
             build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf
             gmloader-miyoo-a30.tar.gz
             a30_package/
-
-      - name: Create Release (if tag)
+      
+      - name: Create Release (on tag)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
