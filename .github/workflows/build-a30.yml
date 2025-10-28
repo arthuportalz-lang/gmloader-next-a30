@@ -12,21 +12,25 @@ on:
 
 jobs:
   build-a30:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04   # <-- alterado para jammy (22.04)
     name: Miyoo A30 (ARM Cortex-A7)
-    
+
     steps:
       - name: Checkout GMLoader-Next
         uses: actions/checkout@v4
         with:
           repository: JohnnyonFlame/gmloader-next
           submodules: recursive
-      
-      - name: Install base dependencies
+
+      - name: Add armhf architecture and install dependencies (amd64 + armhf)
         run: |
+          set -e
+          # habilita multiarch antes do apt update
+          sudo dpkg --add-architecture armhf
           sudo apt-get update
+
+          # instalar toolchain e libs (amd64 e :armhf)
           sudo apt-get install -y --no-install-recommends \
-          sudo apt-get install -y libsdl2-dev:armhf libzip-dev:armhf zlib1g-dev:armhf
             git \
             build-essential \
             python3 \
@@ -35,20 +39,19 @@ jobs:
             g++-arm-linux-gnueabihf \
             binutils-arm-linux-gnueabihf \
             libstdc++-10-dev-armhf-cross \
-            ca-certificates
-      
-      - name: Install cross-compilation libraries
-        run: |
-          sudo dpkg --add-architecture armhf
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+            ca-certificates \
             libsdl2-dev:armhf \
             libzip-dev:armhf \
             zlib1g-dev:armhf
-      
+
+          # limpeza opcional pra reduzir cache do runner
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+
       - name: Build for Miyoo A30
         run: |
-          # Usar flags específicas para Cortex-A7 do A30
+          set -e
+          # Ajuste de flags para Cortex-A7 (A30)
           make -f Makefile.gmloader \
             ARCH=arm-linux-gnueabihf \
             OPTM="-O3 -march=armv7-a -mtune=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard" \
@@ -56,7 +59,7 @@ jobs:
             LLVM_INC=/usr/arm-linux-gnueabihf/include/c++/10/arm-linux-gnueabihf \
             USE_FMOD=0 \
             -j$(nproc)
-      
+
       - name: Verify build
         run: |
           if [ -f "build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf" ]; then
@@ -68,21 +71,19 @@ jobs:
             ls -la build/arm-linux-gnueabihf/gmloader/ || echo "Build directory not found"
             exit 1
           fi
-      
+
       - name: Prepare A30 package
         run: |
+          set -e
           mkdir -p a30_package/lib
-          
-          # Copiar binário (renomear para nome mais descritivo)
+
           cp build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf a30_package/gmloadernext.arm-linux-gnueabihf
           chmod +x a30_package/gmloadernext.arm-linux-gnueabihf
-          
-          # Copiar bibliotecas redist
+
           if [ -d "lib/redist" ]; then
             cp -r lib/redist/* a30_package/lib/ 2>/dev/null || true
           fi
-          
-          # Criar arquivo de configuração
+
           cat > a30_package/gmloader.json << 'EOF'
           {
             "save_dir": "saves",
@@ -93,8 +94,7 @@ jobs:
             "force_platform": "os_android"
           }
           EOF
-          
-          # Criar script de lançamento
+
           cat > a30_package/gmloader.sh << 'EOF'
           #!/bin/sh
           cd $(dirname "$0")
@@ -102,51 +102,16 @@ jobs:
           ./gmloadernext.arm-linux-gnueabihf -c gmloader.json
           EOF
           chmod +x a30_package/gmloader.sh
-          
-          # Criar README
+
           cat > a30_package/README.txt << 'EOF'
-          ═══════════════════════════════════════════════════════════
           GMLoader-Next for Miyoo A30
-          ═══════════════════════════════════════════════════════════
-          
           Compiled with Cortex-A7 optimizations for Miyoo A30.
-          
-          INSTALLATION:
-          ─────────────────────────────────────────────────────────
-          1. Copy entire folder to: /mnt/SDCARD/Roms/PORTS/gmloader/
-          2. Copy gmloader.sh to: /mnt/SDCARD/Roms/PORTS/
-          3. Place your GameMaker Studio APK in this folder
-          4. Edit gmloader.json - change "your_game.apk" to your APK name
-          5. Launch from PORTS menu on A30
-          
-          TESTED GAMES:
-          ─────────────────────────────────────────────────────────
-          - Undertale
-          - Deltarune
-          - Nuclear Throne
-          - Hyper Light Drifter
-          - Your own GameMaker Studio 2 games!
-          
-          REQUIREMENTS:
-          ─────────────────────────────────────────────────────────
-          - GameMaker game exported as Android APK
-          - Miyoo A30 (ARM Cortex-A7)
-          - At least 100MB free space
-          
-          NOTES:
-          ─────────────────────────────────────────────────────────
-          - First launch may take 30-60 seconds
-          - 3D/complex games may run slowly
-          - Best performance with 2D pixel art games
-          
-          Enjoy! 🎮
           EOF
-          
-          # Criar arquivo .tar.gz do pacote
+
           cd a30_package
           tar -czf ../gmloader-miyoo-a30.tar.gz *
           cd ..
-      
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -155,7 +120,7 @@ jobs:
             build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf
             gmloader-miyoo-a30.tar.gz
             a30_package/
-      
+
       - name: Create Release (if tag)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
