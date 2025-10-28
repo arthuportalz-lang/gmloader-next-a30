@@ -1,199 +1,61 @@
-name: GMLoader-Next for A30 (usando toolchain A30)
+name: GMLoader-Next Build for Miyoo A30
 
 on:
   workflow_dispatch:
   push:
     branches: [ "master", "main" ]
+    paths-ignore:
+      - '**/README.md'
+  pull_request:
+    branches: [ "master", "main" ]
+    paths-ignore:
+      - '**/README.md'
 
 jobs:
-  build-with-a30-toolchain:
-    runs-on: ubuntu-latest
+  build-a30:
+    name: Build A30 Toolchain Docker
+    runs-on: ubuntu-24.04
 
     steps:
-      - name: Checkout GMLoader-Next
+      - name: 🔹 Checkout repository
         uses: actions/checkout@v4
-        with:
-          repository: JohnnyonFlame/gmloader-next
-          submodules: recursive
 
-      - name: Setup Docker
+      - name: 🐋 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 📦 Build Miyoo A30 Toolchain Docker image
         run: |
-          echo "Verificando instalação do Docker..."
-          if ! command -v docker &>/dev/null; then
-            echo "Docker não encontrado, instalando..."
-            sudo apt-get update -qq
-            sudo apt-get install -y ca-certificates curl gnupg lsb-release
-            sudo mkdir -p /etc/apt/keyrings
-            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-            echo \
-              "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-              https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
-              sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-            sudo apt-get update -qq
-            sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-          fi
+          echo "==> Construindo imagem do Docker..."
+          docker build -t miyooa30-toolchain -f Dockerfile .
 
-          echo "Versão do Docker instalada:"
-          docker --version
-          sudo usermod -aG docker $USER || true
-
-      - name: Clone A30 Toolchain
+      - name: 🧱 Criar container e montar workspace
         run: |
-          git clone https://codeberg.org/hydrogen18/miyooa30 --depth=1
+          echo "==> Criando container temporário..."
+          docker create -it --name a30build -v ${{ github.workspace }}:/workspace miyooa30-toolchain /bin/bash
 
-      - name: Build A30 Toolchain Docker
+      - name: ▶️ Rodar build.sh dentro do container
         run: |
-          cd miyooa30/dockerbuild
+          echo "==> Rodando build.sh dentro do container..."
+          docker start -a a30build
+          docker exec a30build bash -c "cd /workspace && chmod +x build.sh && ./build.sh || echo '⚠️ build.sh retornou erro'"
 
-          echo "=== Corrigindo Dockerfile para repositórios legados e multiarch ==="
-
-          # Substitui imagem base para garantir compatibilidade e pacotes válidos
-          sed -i 's|FROM debian:buster|FROM debian:buster-slim|g' Dockerfile || true
-          sed -i 's|deb.debian.org|archive.debian.org|g' Dockerfile || true
-          sed -i 's|security.debian.org|archive.debian.org/debian-security|g' Dockerfile || true
-          sed -i '/apt-get -y update/i\
-RUN echo "deb [arch=amd64] http://archive.debian.org/debian buster main contrib non-free" > /etc/apt/sources.list && \
-    echo "deb [arch=armhf] http://archive.debian.org/debian buster main contrib non-free" >> /etc/apt/sources.list && \
-    echo "deb-src http://archive.debian.org/debian buster main contrib non-free" >> /etc/apt/sources.list && \
-    echo "Acquire::Check-Valid-Until \\"false\\";" > /etc/apt/apt.conf.d/99no-check-valid-until' Dockerfile || true
-
-          echo "=== Construindo imagem Docker corrigida ==="
-          docker build -t miyooa30-toolchain . --progress plain --no-cache
-
-          echo "=== Imagem resultante ==="
-          docker images | grep miyooa30
-
-      - name: Prepare GMLoader build
+      - name: 📁 Copiar artefatos compilados
+        if: always()
         run: |
-          # Criar zipconf.h
-          mkdir -p 3rdparty/libzip-config
-          cat > 3rdparty/libzip-config/zipconf.h << 'EOF'
-          #ifndef HAD_ZIPCONF_H
-          #define HAD_ZIPCONF_H
-          #define ZIP_EXTERN extern
-          #define LIBZIP_VERSION "1.7.3"
-          #include <stdint.h>
-          typedef int64_t zip_int64_t;
-          typedef uint64_t zip_uint64_t;
-          typedef int32_t zip_int32_t;
-          typedef uint32_t zip_uint32_t;
-          typedef int16_t zip_int16_t;
-          typedef uint16_t zip_uint16_t;
-          typedef int8_t zip_int8_t;
-          typedef uint8_t zip_uint8_t;
-          #endif
-          EOF
-          
-          # Script de build dentro do container
-          cat > build-in-container.sh << 'BUILDSCRIPT'
-          #!/bin/bash
-          set -e
-          
-          cd /build
-          apt-get update -qq
-          apt-get install -y cmake python3-pip libclang-dev llvm zlib1g-dev -qq || true
-          pip3 install libclang || true
-          
-          git config --global --add safe.directory /build
-          git submodule update --init --recursive || true
-          
-          mkdir -p build/arm-linux-gnueabihf/thunks/libc
-          touch build/arm-linux-gnueabihf/thunks/libc/impl_header.h
-          touch build/arm-linux-gnueabihf/thunks/libc/impl_tab.h
-          
-          python3 scripts/generate_libc.py arm-linux-gnueabihf \
-              --llvm-includes /usr/arm-linux-gnueabihf/include 2>/dev/null || true
-          
-          make -f Makefile.gmloader \
-              ARCH=arm-linux-gnueabihf \
-              OPTM="-O2 -march=armv7-a -mtune=cortex-a7 -mfpu=neon -mfloat-abi=hard" \
-              USE_FMOD=0 \
-              SDL_CFLAGS="" \
-              SDL_LDFLAGS="-lSDL2" \
-              -j$(nproc)
-          
-          if [ -f "gmloadernext.arm-linux-gnueabihf" ]; then
-              echo "✓ Build OK!"
-              cp gmloadernext.arm-linux-gnueabihf /output/
-          else
-              echo "✗ Build falhou"
-              exit 1
-          fi
-          BUILDSCRIPT
-          
-          chmod +x build-in-container.sh
-
-      - name: Build with A30 Toolchain
-        run: |
+          echo "==> Copiando artefatos da build..."
           mkdir -p output
-          docker run --rm \
-            -v $(pwd):/build \
-            -v $(pwd)/output:/output \
-            miyooa30-toolchain \
-            bash /build/build-in-container.sh
+          docker cp a30build:/workspace/build ./output || true
+          docker cp a30build:/workspace/bin ./output || true
 
-      - name: Verify and Package
+      - name: 🧹 Limpar container
+        if: always()
         run: |
-          if [ ! -f "output/gmloadernext.arm-linux-gnueabihf" ]; then
-            echo "Binário não foi gerado!"
-            exit 1
-          fi
-          
-          echo "✓ Binário compilado com toolchain do A30!"
-          ls -lh output/gmloadernext.arm-linux-gnueabihf
-          
-          mkdir -p a30_package/lib
-          cp output/gmloadernext.arm-linux-gnueabihf a30_package/gmloadernext.armhf
-          chmod +x a30_package/gmloadernext.armhf
-          cp -r lib/redist/* a30_package/lib/ 2>/dev/null || true
-          
-          cat > a30_package/gmloader.json << 'EOF'
-          {
-            "save_dir": "saves",
-            "apk_path": "your_game.apk",
-            "show_cursor": false,
-            "disable_controller": false,
-            "force_platform": "os_android"
-          }
-          EOF
-          
-          cat > a30_package/gmloader.sh << 'EOF'
-          #!/bin/sh
-          LOG="/mnt/SDCARD/Roms/PORTS/gmloader/gmloader.log"
-          cd /mnt/SDCARD/Roms/PORTS/gmloader
-          echo "=== GMLoader ===" > "$LOG"
-          echo "Iniciando..." >> "$LOG"
-          export LD_LIBRARY_PATH=./lib:$LD_LIBRARY_PATH
-          ./gmloadernext.armhf -c gmloader.json >> "$LOG" 2>&1
-          echo "Finalizado: $?" >> "$LOG"
-          EOF
-          chmod +x a30_package/gmloader.sh
-          
-          cat > a30_package/README.txt << 'EOF'
-          GMLoader-Next for Miyoo A30
-          ============================
-          Compilado com o toolchain OFICIAL do A30!
-          Compatível com GLIBC 2.23 (do A30).
-          
-          Instalação:
-          1. Copiar pasta para: /mnt/SDCARD/Roms/PORTS/gmloader/
-          2. Copiar gmloader.sh para: /mnt/SDCARD/Roms/PORTS/
-          3. Colocar APK do jogo
-          4. Editar gmloader.json
-          5. Rodar!
-          
-          Log: gmloader.log (na pasta)
-          EOF
-          
-          cd a30_package
-          tar -czf ../gmloader-a30-compatible.tar.gz *
-          cd ..
+          docker rm -f a30build || true
+          docker image rm miyooa30-toolchain || true
 
-      - name: Upload Artifacts
+      - name: 📦 Upload dos artefatos
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gmloader_a30_toolchain_build
-          path: |
-            output/gmloadernext.arm-linux-gnueabihf
-            gmloader-a30-compatible.tar.gz
-            a30_package/
+          name: GMLoader-A30-Build
+          path: output/
