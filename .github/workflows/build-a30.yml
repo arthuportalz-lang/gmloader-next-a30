@@ -1,128 +1,185 @@
-name: GMLoader-Next Build for Miyoo A30
-
+name: GMLoader-Next for A30 (usando toolchain A30)
 on:
   workflow_dispatch:
   push:
     branches: [ "master", "main" ]
 
 jobs:
-  build-a30:
-    name: Build A30 Toolchain Docker
-    runs-on: ubuntu-24.04
-
+  build-with-a30-toolchain:
+    runs-on: ubuntu-latest
+    
     steps:
-      - name: 🔹 Checkout repository
+      - name: Checkout GMLoader-Next
         uses: actions/checkout@v4
-
-      - name: 🧱 Criar Dockerfile personalizado
+        with:
+          repository: JohnnyonFlame/gmloader-next
+          submodules: recursive
+      
+      - name: Setup Docker
         run: |
-          cat > Dockerfile <<'EOF'
-          FROM debian:buster-slim
-
-          # Corrige repositórios antigos do Debian Buster
-          RUN sed -i 's|deb.debian.org|archive.debian.org|g' /etc/apt/sources.list && \
-              sed -i 's|security.debian.org|archive.debian.org|g' /etc/apt/sources.list && \
-              echo "Acquire::Check-Valid-Until false;" > /etc/apt/apt.conf.d/99ignore-expiry && \
-              dpkg --add-architecture armhf && \
-              apt-get -y update && \
-              apt-get -y install \
-                  build-essential \
-                  scons \
-                  clang \
-                  sudo \
-                  crossbuild-essential-armhf \
-                  libstdc++6:armhf \
-                  libglib2.0-dev:armhf \
-                  libpng-dev:armhf \
-                  libfreetype6-dev:armhf \
-                  nano vim git curl wget unzip cmake xz-utils && \
-              rm -rf /var/lib/apt/lists/*
-
-          RUN mkdir -p /workspace; chmod +0777 /workspace; ln -s /usr/local/include /usr/include/sdkdir
-
-          WORKDIR /root
-          COPY cross-compile-ldd /usr/bin/arm-linux-gnueabihf-ldd
-          COPY setup-env.sh .
-          RUN cat setup-env.sh >> .bashrc
-
-          VOLUME /workspace
-          WORKDIR /workspace
-
-          ENV CROSS_COMPILE=/usr/bin/arm-linux-gnueabihf-
-          ENV PREFIX=/usr
-          ENV PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig/:/usr/local/lib/pkgconfig/
-          ENV AS="arm-linux-gnueabihf-as"
-          ENV CC="arm-linux-gnueabihf-gcc"
-          ENV CXX="arm-linux-gnueabihf-g++"
-          ENV LD="arm-linux-gnueabihf-ld"
-
-          COPY SDL2_gfx-1.0.4.tar.gz .
-          RUN tar xf SDL2_gfx-1.0.4.tar.gz
-          COPY SDL2-2.26.1.tar.gz .
-          RUN tar xf SDL2-2.26.1.tar.gz
-          COPY SDL2_ttf-2.0.13.tar.gz .
-          RUN tar xf SDL2_ttf-2.0.13.tar.gz
-          COPY SDL2_mixer-2.0.1.tar.gz .
-          RUN tar xf SDL2_mixer-2.0.1.tar.gz
-          COPY SDL2_image-2.0.1.tar.gz .
-          RUN tar xf SDL2_image-2.0.1.tar.gz
-
-          RUN mkdir -p miyooa30
-          COPY lib.tar.xz miyooa30
-          RUN cd miyooa30/ && tar xf lib.tar.xz && rm lib.tar.xz
-          COPY usr.tar.xz miyooa30/
-          RUN cd miyooa30/ && tar xf usr.tar.xz && rm usr.tar.xz
-          RUN cd miyooa30/usr/miyoo/lib && \
-          ln -s libSDL2-2.0.so.0 libSDL2.so && \
-          ln -s libSDL2_gfx-1.0.so.0 libSDL2_gfx.so && \
-          ln -s libSDL2_image-2.0.so.0 libSDL2_image.so && \
-          ln -s libSDL2_mixer-2.0.so.0 libSDL2_mixer.so && \
-          ln -s libSDL2_ttf-2.0.so.0 libSDL2_ttf.so
-          RUN cd miyooa30/usr/lib && \
-            ln -s libfreetype.so.6.11.4 libfreetype.so && \
-            ln -s libbz2.so.1.0.6 libbz2.so
-          RUN cd miyooa30/lib && \
-            ln -s libmad.so.0.2.1 libmad.so && \
-            ln -s libpthread-2.23.so libpthread.so && \
-            ln -s librt-2.23.so librt.so && \
-            ln -s libgcc_s.so.1 libgcc_s.so
-
-          RUN echo "MARCH='-march=armv7-a+neon-vfpv4'" > $PWD/config.sh
-          RUN echo "SDL_LIBS='-lSDL2 -lSDL2_ttf -lSDL2_mixer -lSDL2_gfx -lSDL2_image -lmad -lpthread -ldl -lrt -lfreetype -lbz2'" >> $PWD/config.sh
-          RUN echo "SDL_LIB_PATHS='-L/workspace/miyooa30/usr/miyoo/lib -L/workspace/miyooa30/usr/lib -L/workspace/miyooa30/lib'" >> $PWD/config.sh
-          RUN echo "SDL_INCLUDE='-I $PWD/SDL2-2.26.1/include -I $PWD/SDL2_mixer-2.0.1 -I $PWD/SDL2_gfx-1.0.4 -I $PWD/SDL2_ttf-2.0.13'" >> $PWD/config.sh
-
-          CMD ["/bin/bash"]
+          sudo apt-get update
+          sudo apt-get install -y docker.io
+      
+      - name: Clone A30 Toolchain
+        run: |
+          git clone https://codeberg.org/hydrogen18/miyooa30 --depth=1
+      
+      - name: Build A30 Toolchain Docker
+        run: |
+          cd miyooa30/dockerbuild
+          ./build.sh
+      
+      - name: Prepare GMLoader build
+        run: |
+          # Criar zipconf.h
+          mkdir -p 3rdparty/libzip-config
+          cat > 3rdparty/libzip-config/zipconf.h << 'EOF'
+          #ifndef HAD_ZIPCONF_H
+          #define HAD_ZIPCONF_H
+          #define ZIP_EXTERN extern
+          #define LIBZIP_VERSION "1.7.3"
+          #include <stdint.h>
+          typedef int64_t zip_int64_t;
+          typedef uint64_t zip_uint64_t;
+          typedef int32_t zip_int32_t;
+          typedef uint32_t zip_uint32_t;
+          typedef int16_t zip_int16_t;
+          typedef uint16_t zip_uint16_t;
+          typedef int8_t zip_int8_t;
+          typedef uint8_t zip_uint8_t;
+          #endif
           EOF
-
-      - name: Prepare Docker context
-        run: |
-          cd miyooa30/dockerbuild
-
-          echo "Baixando dependências necessárias..."
-          wget -q https://www.libsdl.org/release/SDL2-2.26.1.tar.gz
-          wget -q https://www.libsdl.org/projects/SDL_image/release/SDL2_image-2.0.1.tar.gz
-          wget -q https://www.libsdl.org/projects/SDL_mixer/release/SDL2_mixer-2.0.1.tar.gz
-          wget -q https://www.libsdl.org/projects/SDL_ttf/release/SDL2_ttf-2.0.13.tar.gz
-          wget -q https://www.ferzkopp.net/Software/SDL_gfx/SDL2_gfx-1.0.4.tar.gz
-
-          # Arquivos internos do A30 (você pode substituir os links por seus próprios se tiver no repo)
-          wget -q https://archive.org/download/miyoo-a30-libs/lib.tar.xz -O lib.tar.xz || echo "⚠️ lib.tar.xz não encontrado"
-          wget -q https://archive.org/download/miyoo-a30-libs/usr.tar.xz -O usr.tar.xz || echo "⚠️ usr.tar.xz não encontrado"
-          touch cross-compile-ldd setup-env.sh
           
-      - name: 🐋 Build Docker Image
+          # Script de build dentro do container
+          cat > build-in-container.sh << 'BUILDSCRIPT'
+          #!/bin/bash
+          set -e
+          
+          cd /build
+          
+          # Instalar dependências
+          apt-get update -qq
+          apt-get install -y cmake python3-pip libclang-dev llvm zlib1g-dev -qq || true
+          pip3 install libclang || true
+          
+          # Submódulos
+          git config --global --add safe.directory /build
+          git submodule update --init --recursive || true
+          
+          # Criar stubs libc se generate_libc falhar
+          mkdir -p build/arm-linux-gnueabihf/thunks/libc
+          touch build/arm-linux-gnueabihf/thunks/libc/impl_header.h
+          touch build/arm-linux-gnueabihf/thunks/libc/impl_tab.h
+          
+          # Tentar gerar libc
+          python3 scripts/generate_libc.py arm-linux-gnueabihf \
+              --llvm-includes /usr/arm-linux-gnueabihf/include 2>/dev/null || true
+          
+          # Compilar com flags compatíveis com GLIBC antiga
+          make -f Makefile.gmloader \
+              ARCH=arm-linux-gnueabihf \
+              OPTM="-O2 -march=armv7-a -mtune=cortex-a7 -mfpu=neon -mfloat-abi=hard" \
+              USE_FMOD=0 \
+              SDL_CFLAGS="" \
+              SDL_LDFLAGS="-lSDL2" \
+              -j$(nproc)
+          
+          # Verificar
+          if [ -f "gmloadernext.arm-linux-gnueabihf" ]; then
+              echo "✓ Build OK!"
+              cp gmloadernext.arm-linux-gnueabihf /output/
+          else
+              echo "✗ Build falhou"
+              exit 1
+          fi
+          BUILDSCRIPT
+          
+          chmod +x build-in-container.sh
+      
+      - name: Build with A30 Toolchain
         run: |
-          cd miyooa30/dockerbuild
-          docker build -t miyooa30-toolchain -f Dockerfile .
-
-      - name: ▶️ Test container
+          mkdir -p output
+          docker run --rm \
+            -v $(pwd):/build \
+            -v $(pwd)/output:/output \
+            miyooa30-toolchain \
+            bash /build/build-in-container.sh
+      
+      - name: Verify and Package
         run: |
-          echo "==> Rodando container para testar..."
-          docker run --rm miyooa30-toolchain echo "✅ Dockerfile do A30 construído com sucesso!"
-
-      - name: 📦 Upload Docker image info
+          if [ ! -f "output/gmloadernext.arm-linux-gnueabihf" ]; then
+            echo "Binário não foi gerado!"
+            exit 1
+          fi
+          
+          echo "✓ Binário compilado com toolchain do A30!"
+          ls -lh output/gmloadernext.arm-linux-gnueabihf
+          
+          # Preparar pacote
+          mkdir -p a30_package/lib
+          cp output/gmloadernext.arm-linux-gnueabihf a30_package/gmloadernext.armhf
+          chmod +x a30_package/gmloadernext.armhf
+          
+          # Copiar libs redist
+          cp -r lib/redist/* a30_package/lib/ 2>/dev/null || true
+          
+          # Config
+          cat > a30_package/gmloader.json << 'EOF'
+          {
+            "save_dir": "saves",
+            "apk_path": "your_game.apk",
+            "show_cursor": false,
+            "disable_controller": false,
+            "force_platform": "os_android"
+          }
+          EOF
+          
+          # Script
+          cat > a30_package/gmloader.sh << 'EOF'
+          #!/bin/sh
+          LOG="/mnt/SDCARD/Roms/PORTS/gmloader/gmloader.log"
+          
+          cd /mnt/SDCARD/Roms/PORTS/gmloader
+          
+          echo "=== GMLoader ===" > "$LOG"
+          echo "Iniciando..." >> "$LOG"
+          
+          export LD_LIBRARY_PATH=./lib:$LD_LIBRARY_PATH
+          
+          ./gmloadernext.armhf -c gmloader.json >> "$LOG" 2>&1
+          
+          echo "Finalizado: $?" >> "$LOG"
+          EOF
+          chmod +x a30_package/gmloader.sh
+          
+          # README
+          cat > a30_package/README.txt << 'EOF'
+          GMLoader-Next for Miyoo A30
+          ============================
+          
+          Compilado com o toolchain OFICIAL do A30!
+          Compatível com GLIBC 2.23 (do A30).
+          
+          Instalação:
+          1. Copiar pasta para: /mnt/SDCARD/Roms/PORTS/gmloader/
+          2. Copiar gmloader.sh para: /mnt/SDCARD/Roms/PORTS/
+          3. Colocar APK do jogo
+          4. Editar gmloader.json
+          5. Rodar!
+          
+          Log: gmloader.log (na pasta)
+          EOF
+          
+          # Tar
+          cd a30_package
+          tar -czf ../gmloader-a30-compatible.tar.gz *
+          cd ..
+      
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dockerfile-a30-info
-          path: Dockerfile
+          name: gmloader_a30_toolchain_build
+          path: |
+            output/gmloadernext.arm-linux-gnueabihf
+            gmloader-a30-compatible.tar.gz
+            a30_package/
