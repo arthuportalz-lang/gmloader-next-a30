@@ -44,7 +44,23 @@ jobs:
       - name: Build A30 Toolchain Docker
         run: |
           cd miyooa30/dockerbuild
-          ./build.sh
+
+          echo "=== Corrigindo repositórios Debian antigos no Dockerfile ==="
+          sed -i 's|deb.debian.org|archive.debian.org|g' Dockerfile || true
+          sed -i 's|security.debian.org|archive.debian.org/debian-security|g' Dockerfile || true
+          sed -i 's|buster/updates|buster/updates main contrib non-free|g' Dockerfile || true
+
+          echo 'Acquire::Check-Valid-Until "false";' | sudo tee /etc/apt/apt.conf.d/99no-check-valid-until >/dev/null
+
+          echo "=== Iniciando build do toolchain ==="
+          bash build.sh || {
+            echo "❌ Falha ao construir o toolchain!"
+            docker ps -a
+            exit 1
+          }
+
+          echo "=== Imagens Docker geradas ==="
+          docker images | grep miyooa30 || echo "⚠️ Nenhuma imagem 'miyooa30' detectada!"
 
       - name: Prepare GMLoader build
         run: |
