@@ -37,7 +37,8 @@ jobs:
             g++-arm-linux-gnueabihf \
             libsdl2-dev:armhf \
             libzip-dev:armhf \
-            ca-certificates
+            ca-certificates \
+            file
       
       - name: Checkout GMLoader-Next
         uses: actions/checkout@v4
@@ -58,8 +59,12 @@ jobs:
         run: |
           if [ -f "build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf" ]; then
             echo "✓ Build successful for Miyoo A30!"
-            file build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf
             ls -lh build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf
+            echo ""
+            echo "Binary info:"
+            file build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf || echo "file command not available"
+            echo ""
+            echo "Size: $(stat -c%s build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf) bytes"
           else
             echo "✗ Build failed - binary not found"
             ls -la build/arm-linux-gnueabihf/gmloader/ 2>/dev/null || echo "Build directory doesn't exist"
