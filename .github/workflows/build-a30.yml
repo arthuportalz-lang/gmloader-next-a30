@@ -12,7 +12,7 @@ on:
 
 jobs:
   build-a30:
-    runs-on: ubuntu-22.04   # <-- alterado para jammy (22.04)
+    runs-on: ubuntu-latest   # pode ser 24.04; o passo abaixo ajeita as fontes pra armhf
     name: Miyoo A30 (ARM Cortex-A7)
 
     steps:
@@ -22,14 +22,43 @@ jobs:
           repository: JohnnyonFlame/gmloader-next
           submodules: recursive
 
-      - name: Add armhf architecture and install dependencies (amd64 + armhf)
+      - name: Prepare apt for armhf on noble (fix 404s)
         run: |
-          set -e
-          # habilita multiarch antes do apt update
-          sudo dpkg --add-architecture armhf
-          sudo apt-get update
+          set -euo pipefail
 
-          # instalar toolchain e libs (amd64 e :armhf)
+          # habilita multiarch primeiro
+          sudo dpkg --add-architecture armhf || true
+
+          # 1) marca as entradas "noble" existentes para só buscar amd64 nelas,
+          #    evitando que apt consulte security.ubuntu.com por armhf (causa 404).
+          #    Faz backup (.bak) por segurança.
+          sudo grep -q "noble" /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || true
+          sudo bash -c '
+          for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
+            [ -f "$f" ] || continue
+            # só tocar linhas que contenham "noble" (24.04) e que sejam "deb"
+            sudo sed -E -i.bak "/^deb .*noble/{
+              /\\[arch=/! s#^deb #deb [arch=amd64] #
+            }" "$f" || true
+          done
+          '
+
+          # 2) adicionar repositório ports para armhf (onde os pacotes armhf existem)
+          cat <<'EOF' | sudo tee /etc/apt/sources.list.d/ubuntu-ports-armhf.list
+          deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse
+          deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse
+          deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse
+          deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports noble-backports main restricted universe multiverse
+          EOF
+
+          # (Opcional) confiança nas chaves — normalmente o keyring padrão já serve,
+          # mas em casos estranhos pode ser preciso instalar ubuntu-keyring:
+          sudo apt-get update -y || true
+
+      - name: Install base dependencies + cross libs (amd64 + armhf)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             git \
             build-essential \
@@ -44,14 +73,9 @@ jobs:
             libzip-dev:armhf \
             zlib1g-dev:armhf
 
-          # limpeza opcional pra reduzir cache do runner
-          sudo apt-get clean
-          sudo rm -rf /var/lib/apt/lists/*
-
       - name: Build for Miyoo A30
         run: |
-          set -e
-          # Ajuste de flags para Cortex-A7 (A30)
+          set -euo pipefail
           make -f Makefile.gmloader \
             ARCH=arm-linux-gnueabihf \
             OPTM="-O3 -march=armv7-a -mtune=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard" \
@@ -74,16 +98,13 @@ jobs:
 
       - name: Prepare A30 package
         run: |
-          set -e
+          set -euo pipefail
           mkdir -p a30_package/lib
-
           cp build/arm-linux-gnueabihf/gmloader/gmloadernext.armhf a30_package/gmloadernext.arm-linux-gnueabihf
           chmod +x a30_package/gmloadernext.arm-linux-gnueabihf
-
           if [ -d "lib/redist" ]; then
             cp -r lib/redist/* a30_package/lib/ 2>/dev/null || true
           fi
-
           cat > a30_package/gmloader.json << 'EOF'
           {
             "save_dir": "saves",
@@ -94,7 +115,6 @@ jobs:
             "force_platform": "os_android"
           }
           EOF
-
           cat > a30_package/gmloader.sh << 'EOF'
           #!/bin/sh
           cd $(dirname "$0")
@@ -102,12 +122,6 @@ jobs:
           ./gmloadernext.arm-linux-gnueabihf -c gmloader.json
           EOF
           chmod +x a30_package/gmloader.sh
-
-          cat > a30_package/README.txt << 'EOF'
-          GMLoader-Next for Miyoo A30
-          Compiled with Cortex-A7 optimizations for Miyoo A30.
-          EOF
-
           cd a30_package
           tar -czf ../gmloader-miyoo-a30.tar.gz *
           cd ..
