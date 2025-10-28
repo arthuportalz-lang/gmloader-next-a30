@@ -95,8 +95,26 @@ jobs:
           CMD ["/bin/bash"]
           EOF
 
-      - name: 🐋 Build Docker image
-        run: docker build -t miyooa30-toolchain -f Dockerfile .
+      - name: Prepare Docker context
+        run: |
+          cd miyooa30/dockerbuild
+
+          echo "Baixando dependências necessárias..."
+          wget -q https://www.libsdl.org/release/SDL2-2.26.1.tar.gz
+          wget -q https://www.libsdl.org/projects/SDL_image/release/SDL2_image-2.0.1.tar.gz
+          wget -q https://www.libsdl.org/projects/SDL_mixer/release/SDL2_mixer-2.0.1.tar.gz
+          wget -q https://www.libsdl.org/projects/SDL_ttf/release/SDL2_ttf-2.0.13.tar.gz
+          wget -q https://www.ferzkopp.net/Software/SDL_gfx/SDL2_gfx-1.0.4.tar.gz
+
+          # Arquivos internos do A30 (você pode substituir os links por seus próprios se tiver no repo)
+          wget -q https://archive.org/download/miyoo-a30-libs/lib.tar.xz -O lib.tar.xz || echo "⚠️ lib.tar.xz não encontrado"
+          wget -q https://archive.org/download/miyoo-a30-libs/usr.tar.xz -O usr.tar.xz || echo "⚠️ usr.tar.xz não encontrado"
+          touch cross-compile-ldd setup-env.sh
+          
+      - name: 🐋 Build Docker Image
+        run: |
+          cd miyooa30/dockerbuild
+          docker build -t miyooa30-toolchain -f Dockerfile .
 
       - name: ▶️ Test container
         run: |
