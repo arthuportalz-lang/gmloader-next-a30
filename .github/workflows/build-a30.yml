@@ -45,22 +45,23 @@ jobs:
         run: |
           cd miyooa30/dockerbuild
 
-          echo "=== Corrigindo repositórios Debian antigos no Dockerfile ==="
+          echo "=== Corrigindo Dockerfile para repositórios legados e multiarch ==="
+
+          # Substitui imagem base para garantir compatibilidade e pacotes válidos
+          sed -i 's|FROM debian:buster|FROM debian:buster-slim|g' Dockerfile || true
           sed -i 's|deb.debian.org|archive.debian.org|g' Dockerfile || true
           sed -i 's|security.debian.org|archive.debian.org/debian-security|g' Dockerfile || true
-          sed -i 's|buster/updates|buster/updates main contrib non-free|g' Dockerfile || true
+          sed -i '/apt-get -y update/i\
+RUN echo "deb [arch=amd64] http://archive.debian.org/debian buster main contrib non-free" > /etc/apt/sources.list && \
+    echo "deb [arch=armhf] http://archive.debian.org/debian buster main contrib non-free" >> /etc/apt/sources.list && \
+    echo "deb-src http://archive.debian.org/debian buster main contrib non-free" >> /etc/apt/sources.list && \
+    echo "Acquire::Check-Valid-Until \\"false\\";" > /etc/apt/apt.conf.d/99no-check-valid-until' Dockerfile || true
 
-          echo 'Acquire::Check-Valid-Until "false";' | sudo tee /etc/apt/apt.conf.d/99no-check-valid-until >/dev/null
+          echo "=== Construindo imagem Docker corrigida ==="
+          docker build -t miyooa30-toolchain . --progress plain --no-cache
 
-          echo "=== Iniciando build do toolchain ==="
-          bash build.sh || {
-            echo "❌ Falha ao construir o toolchain!"
-            docker ps -a
-            exit 1
-          }
-
-          echo "=== Imagens Docker geradas ==="
-          docker images | grep miyooa30 || echo "⚠️ Nenhuma imagem 'miyooa30' detectada!"
+          echo "=== Imagem resultante ==="
+          docker images | grep miyooa30
 
       - name: Prepare GMLoader build
         run: |
