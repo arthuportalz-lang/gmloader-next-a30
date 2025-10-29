@@ -130,44 +130,31 @@ jobs:
               cd /build
           fi
           
-          if [ ! -f "/workspace/SDL2-2.26.1/include/SDL.h" ]; then
-              echo "ERRO: SDL.h não existe!"
-              exit 1
-          fi
-          
           echo "✓ SDL2 encontrado"
           
-          # Criar um pkg-config fake
-          echo "Criando pkg-config fake..."
-          echo '#!/bin/bash' > /tmp/pkg-config-fake
-          echo 'case "$1" in' >> /tmp/pkg-config-fake
-          echo '    --cflags)' >> /tmp/pkg-config-fake
-          echo '        echo "-I/workspace/SDL2-2.26.1/include"' >> /tmp/pkg-config-fake
-          echo '        ;;' >> /tmp/pkg-config-fake
-          echo '    --libs)' >> /tmp/pkg-config-fake
-          echo '        echo "-L/workspace/miyooa30/usr/miyoo/lib -lSDL2"' >> /tmp/pkg-config-fake
-          echo '        ;;' >> /tmp/pkg-config-fake
-          echo '    *)' >> /tmp/pkg-config-fake
-          echo '        echo ""' >> /tmp/pkg-config-fake
-          echo '        ;;' >> /tmp/pkg-config-fake
-          echo 'esac' >> /tmp/pkg-config-fake
-          chmod +x /tmp/pkg-config-fake
+          # SOLUÇÃO DEFINITIVA: Modificar o código fonte para incluir SDL.h corretamente
+          echo "Modificando código fonte para incluir SDL2..."
           
-          # Colocar no PATH
-          export PATH="/tmp:$PATH"
-          ln -sf /tmp/pkg-config-fake /tmp/pkg-config
+          # Substituir #include <SDL2/SDL.h> por #include <SDL.h> E adicionar -I flag
+          find loader/ -name "*.cpp" -o -name "*.c" | xargs sed -i 's|#include <SDL2/SDL.h>|#include <SDL.h>|g'
+          find gmloader/ -name "*.cpp" -o -name "*.c" | xargs sed -i 's|#include <SDL2/SDL.h>|#include <SDL.h>|g'
           
-          echo "pkg-config fake instalado:"
-          which pkg-config
-          pkg-config --cflags sdl2
-          pkg-config --libs sdl2
+          echo "Arquivos modificados:"
+          grep -r "include.*SDL" loader/ gmloader/ 2>/dev/null | head -5 || echo "Nenhum include SDL encontrado"
           echo ""
           
-          echo "Compilando GMLoader..."
+          # Criar pkg-config fake como backup
+          echo '#!/bin/bash' > /tmp/pkg-config
+          echo 'echo "-I/workspace/SDL2-2.26.1/include"' >> /tmp/pkg-config
+          chmod +x /tmp/pkg-config
+          export PATH="/tmp:$PATH"
+          
+          echo "Compilando GMLoader com SDL2..."
           make -f Makefile.gmloader \
               ARCH=arm-linux-gnueabihf \
-              OPTM="-O2 -march=armv7-a -mtune=cortex-a7 -mfpu=neon -mfloat-abi=hard" \
+              OPTM="-O2 -march=armv7-a -mtune=cortex-a7 -mfpu=neon -mfloat-abi=hard -I/workspace/SDL2-2.26.1/include" \
               USE_FMOD=0 \
+              LDFLAGS="-L/workspace/miyooa30/usr/miyoo/lib -lSDL2" \
               -j$(nproc) 2>&1 | tee /tmp/build.log
           
           BUILD_EXIT=${PIPESTATUS[0]}
