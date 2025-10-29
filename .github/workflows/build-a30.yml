@@ -137,18 +137,39 @@ jobs:
           
           echo "✓ SDL2 encontrado"
           
-          # CRÍTICO: Modificar Makefile para NÃO usar pkg-config
-          echo "Desabilitando pkg-config e forçando caminhos SDL2..."
+          # Debug: Ver como o Makefile usa pkg-config
+          echo "=== Procurando pkg-config no Makefile ==="
+          grep -n "pkg-config" Makefile.gmloader || echo "pkg-config não encontrado no Makefile"
+          echo ""
           
-          # Substituir comandos pkg-config por caminhos fixos
-          sed -i 's|`pkg-config --cflags sdl2`|-I/workspace/SDL2-2.26.1/include|g' Makefile.gmloader
-          sed -i 's|`pkg-config --libs sdl2`|-L/workspace/miyooa30/usr/miyoo/lib -lSDL2|g' Makefile.gmloader
-          sed -i 's|$(shell pkg-config --cflags sdl2)|-I/workspace/SDL2-2.26.1/include|g' Makefile.gmloader
-          sed -i 's|$(shell pkg-config --libs sdl2)|-L/workspace/miyooa30/usr/miyoo/lib -lSDL2|g' Makefile.gmloader
+          # Desabilitar pkg-config de TODAS as formas possíveis
+          echo "Desabilitando pkg-config..."
           
-          # Mostrar o que mudou
-          echo "Verificando modificações no Makefile:"
-          grep -n "SDL2" Makefile.gmloader | head -10
+          # Criar um pkg-config fake que sempre retorna nossos caminhos
+          cat > /tmp/pkg-config-fake << 'PKGCONFIG'
+#!/bin/bash
+case "$1" in
+    --cflags)
+        echo "-I/workspace/SDL2-2.26.1/include"
+        ;;
+    --libs)
+        echo "-L/workspace/miyooa30/usr/miyoo/lib -lSDL2"
+        ;;
+    *)
+        echo ""
+        ;;
+esac
+PKGCONFIG
+          chmod +x /tmp/pkg-config-fake
+          
+          # Colocar nosso pkg-config fake no PATH
+          export PATH="/tmp:$PATH"
+          ln -sf /tmp/pkg-config-fake /tmp/pkg-config
+          
+          echo "pkg-config fake instalado:"
+          which pkg-config
+          pkg-config --cflags sdl2
+          pkg-config --libs sdl2
           echo ""
           
           echo "Compilando GMLoader..."
