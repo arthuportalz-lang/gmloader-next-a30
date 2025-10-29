@@ -38,17 +38,8 @@ jobs:
       - name: Build A30 Toolchain Docker
         run: |
           cd miyooa30/dockerbuild
-          # Forçar base Ubuntu 24.04 caso não esteja definido
-          sed -i 's|FROM .*|FROM ubuntu:24.04|' Dockerfile || true
-
-          # Ajustes multiarch e repositórios para 24.04
-          dpkg --add-architecture armhf
-          apt-get update -qq
-          apt-get install -y software-properties-common
-          add-apt-repository "deb [arch=amd64,armhf] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs) main universe multiverse restricted"
-          apt-get update -qq
-
-          ./build.sh || true  # permite continuar mesmo que alguns pacotes armhf falhem
+          # Rodar o build.sh normalmente, dentro do container ele tem sudo/root
+          ./build.sh
 
       - name: Prepare GMLoader build
         run: |
