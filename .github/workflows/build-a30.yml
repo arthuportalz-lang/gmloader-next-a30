@@ -137,32 +137,23 @@ jobs:
           
           echo "✓ SDL2 encontrado"
           
-          # Debug: Ver como o Makefile usa pkg-config
-          echo "=== Procurando pkg-config no Makefile ==="
-          grep -n "pkg-config" Makefile.gmloader || echo "pkg-config não encontrado no Makefile"
-          echo ""
-          
-          # Desabilitar pkg-config de TODAS as formas possíveis
-          echo "Desabilitando pkg-config..."
-          
-          # Criar um pkg-config fake que sempre retorna nossos caminhos
-          cat > /tmp/pkg-config-fake << 'ENDPKGCONFIG'
-          #!/bin/bash
-          case "$1" in
-              --cflags)
-                  echo "-I/workspace/SDL2-2.26.1/include"
-                  ;;
-              --libs)
-                  echo "-L/workspace/miyooa30/usr/miyoo/lib -lSDL2"
-                  ;;
-              *)
-                  echo ""
-                  ;;
-          esac
-          ENDPKGCONFIG
+          # Criar um pkg-config fake
+          echo "Criando pkg-config fake..."
+          echo '#!/bin/bash' > /tmp/pkg-config-fake
+          echo 'case "$1" in' >> /tmp/pkg-config-fake
+          echo '    --cflags)' >> /tmp/pkg-config-fake
+          echo '        echo "-I/workspace/SDL2-2.26.1/include"' >> /tmp/pkg-config-fake
+          echo '        ;;' >> /tmp/pkg-config-fake
+          echo '    --libs)' >> /tmp/pkg-config-fake
+          echo '        echo "-L/workspace/miyooa30/usr/miyoo/lib -lSDL2"' >> /tmp/pkg-config-fake
+          echo '        ;;' >> /tmp/pkg-config-fake
+          echo '    *)' >> /tmp/pkg-config-fake
+          echo '        echo ""' >> /tmp/pkg-config-fake
+          echo '        ;;' >> /tmp/pkg-config-fake
+          echo 'esac' >> /tmp/pkg-config-fake
           chmod +x /tmp/pkg-config-fake
           
-          # Colocar nosso pkg-config fake no PATH
+          # Colocar no PATH
           export PATH="/tmp:$PATH"
           ln -sf /tmp/pkg-config-fake /tmp/pkg-config
           
