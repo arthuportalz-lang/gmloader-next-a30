@@ -123,45 +123,47 @@ jobs:
           echo ""
           echo "[6/6] Preparando SDL2 e compilando..."
           
-          # Debug completo do workspace
-          echo "=== Conteúdo de /workspace ==="
-          ls -la /workspace/ 2>&1
-          echo ""
+          # CRÍTICO: Garantir que SDL2 existe
+          echo "=== Verificando SDL2 ==="
           
-          echo "=== Procurando SDL2 ==="
-          find /workspace -maxdepth 2 -name "SDL*" -type d 2>/dev/null || echo "Nenhuma pasta SDL encontrada"
-          find /workspace -maxdepth 3 -name "SDL.h" 2>/dev/null || echo "SDL.h não encontrado"
-          echo ""
-          
-          echo "=== Procurando libSDL2 ==="
-          find /workspace -name "libSDL2*" 2>/dev/null | head -10 || echo "libSDL2 não encontrado"
-          echo ""
-          
-          # Se SDL2-2.26.1 não existe, descompactar
           if [ ! -d "/workspace/SDL2-2.26.1" ]; then
-              echo "SDL2-2.26.1 não existe, descompactando..."
-              cd /workspace
-              if [ -f "SDL2-2.26.1.tar.gz" ]; then
+              echo "SDL2-2.26.1 não existe!"
+              echo "Conteúdo de /workspace:"
+              ls -la /workspace/
+              
+              if [ -f "/workspace/SDL2-2.26.1.tar.gz" ]; then
+                  echo "Descompactando SDL2-2.26.1.tar.gz..."
+                  cd /workspace
                   tar xf SDL2-2.26.1.tar.gz
+                  cd /build
                   echo "✓ SDL2 descompactado"
               else
-                  echo "✗ SDL2-2.26.1.tar.gz não encontrado!"
+                  echo "✗ ERRO CRÍTICO: SDL2-2.26.1.tar.gz não encontrado!"
+                  echo "Procurando qualquer arquivo SDL2:"
+                  find /workspace -name "*SDL*" 2>/dev/null || echo "Nada encontrado"
+                  exit 1
               fi
-              cd /build
-          else
-              echo "✓ SDL2-2.26.1 já existe"
           fi
           
-          # Verificar se include existe
-          if [ -d "/workspace/SDL2-2.26.1/include" ]; then
-              echo "✓ SDL2 include encontrado"
-              ls -la /workspace/SDL2-2.26.1/include/ | head -10
-          else
-              echo "✗ SDL2 include NÃO existe!"
+          # Verificar se include/ existe
+          if [ ! -d "/workspace/SDL2-2.26.1/include" ]; then
+              echo "✗ ERRO: SDL2-2.26.1/include não existe após descompactar!"
+              echo "Conteúdo de SDL2-2.26.1:"
+              ls -la /workspace/SDL2-2.26.1/ || echo "Pasta não existe"
+              exit 1
           fi
-          echo ""
           
-          # Configurar flags SDL2
+          # Verificar se SDL.h existe
+          if [ ! -f "/workspace/SDL2-2.26.1/include/SDL.h" ]; then
+              echo "✗ ERRO: SDL.h não encontrado!"
+              echo "Conteúdo de include:"
+              ls -la /workspace/SDL2-2.26.1/include/ || echo "Pasta include não existe"
+              exit 1
+          fi
+          
+          echo "✓ SDL2 OK: /workspace/SDL2-2.26.1/include/SDL.h existe"
+          
+          # Configurar flags
           SDL_CFLAGS="-I/workspace/SDL2-2.26.1/include"
           SDL_LDFLAGS="-L/workspace/miyooa30/usr/miyoo/lib -lSDL2 -lpthread -ldl -lrt"
           
