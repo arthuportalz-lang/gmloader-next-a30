@@ -122,25 +122,36 @@ jobs:
           
           echo "[6/6] Compilando GMLoader..."
           
-          # Descobrir onde está o SDL2 no toolchain do A30
-          SDL2_INCLUDE=$(find /workspace -name "SDL.h" -path "*/SDL2/*" -exec dirname {} \; 2>/dev/null | head -1)
-          SDL2_LIB=$(find /workspace -name "libSDL2.so*" 2>/dev/null | head -1 | xargs dirname)
+          # Debug: mostrar estrutura do workspace
+          echo "=== Estrutura do workspace ==="
+          ls -la /workspace/ | head -20
+          echo ""
           
-          echo "SDL2 Include: $SDL2_INCLUDE"
-          echo "SDL2 Lib: $SDL2_LIB"
+          # Debug: procurar SDL2
+          echo "=== Procurando SDL2 ==="
+          find /workspace -name "SDL.h" 2>/dev/null | head -5 || echo "SDL.h não encontrado"
+          find /workspace -name "libSDL2.so*" 2>/dev/null | head -5 || echo "libSDL2.so não encontrado"
+          echo ""
           
-          # Se encontrou SDL2, adicionar aos flags
-          if [ -n "$SDL2_INCLUDE" ]; then
-            SDL_CFLAGS="-I${SDL2_INCLUDE}/.."
-            SDL_LDFLAGS="-L${SDL2_LIB} -lSDL2"
-          else
-            # Fallback: tentar caminhos conhecidos do A30
-            SDL_CFLAGS="-I/workspace/SDL2-2.26.1/include -I/workspace/miyooa30/usr/miyoo/include"
-            SDL_LDFLAGS="-L/workspace/miyooa30/usr/miyoo/lib -lSDL2"
-          fi
+          # Usar caminhos do Dockerfile do A30 (baseado no setup original)
+          SDL_CFLAGS="-I/workspace/SDL2-2.26.1/include"
+          SDL_LDFLAGS="-L/workspace/miyooa30/usr/miyoo/lib -lSDL2 -lpthread -ldl -lrt"
           
           echo "Usando SDL_CFLAGS: $SDL_CFLAGS"
           echo "Usando SDL_LDFLAGS: $SDL_LDFLAGS"
+          echo ""
+          
+          # Verificar se o diretório existe
+          if [ ! -d "/workspace/SDL2-2.26.1/include" ]; then
+              echo "AVISO: /workspace/SDL2-2.26.1/include não existe!"
+              echo "Tentando descompactar SDL2..."
+              cd /workspace
+              if [ -f "SDL2-2.26.1.tar.gz" ]; then
+                  tar xf SDL2-2.26.1.tar.gz
+                  echo "SDL2 descompactado"
+              fi
+              cd /build
+          fi
           
           make -f Makefile.gmloader \
               ARCH=arm-linux-gnueabihf \
