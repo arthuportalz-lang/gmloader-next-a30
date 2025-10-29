@@ -146,20 +146,20 @@ jobs:
           echo "Desabilitando pkg-config..."
           
           # Criar um pkg-config fake que sempre retorna nossos caminhos
-          cat > /tmp/pkg-config-fake << 'PKGCONFIG'
-#!/bin/bash
-case "$1" in
-    --cflags)
-        echo "-I/workspace/SDL2-2.26.1/include"
-        ;;
-    --libs)
-        echo "-L/workspace/miyooa30/usr/miyoo/lib -lSDL2"
-        ;;
-    *)
-        echo ""
-        ;;
-esac
-PKGCONFIG
+          cat > /tmp/pkg-config-fake << 'ENDPKGCONFIG'
+          #!/bin/bash
+          case "$1" in
+              --cflags)
+                  echo "-I/workspace/SDL2-2.26.1/include"
+                  ;;
+              --libs)
+                  echo "-L/workspace/miyooa30/usr/miyoo/lib -lSDL2"
+                  ;;
+              *)
+                  echo ""
+                  ;;
+          esac
+          ENDPKGCONFIG
           chmod +x /tmp/pkg-config-fake
           
           # Colocar nosso pkg-config fake no PATH
