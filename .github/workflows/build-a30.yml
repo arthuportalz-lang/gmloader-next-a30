@@ -123,52 +123,41 @@ jobs:
           echo ""
           echo "[6/6] Preparando SDL2 e compilando..."
           
-          # CRÍTICO: Garantir que SDL2 existe
-          echo "=== Verificando SDL2 ==="
-          
+          # Garantir SDL2
           if [ ! -d "/workspace/SDL2-2.26.1" ]; then
-              echo "SDL2-2.26.1 não existe!"
-              echo "Conteúdo de /workspace:"
-              ls -la /workspace/
-              
-              if [ -f "/workspace/SDL2-2.26.1.tar.gz" ]; then
-                  echo "Descompactando SDL2-2.26.1.tar.gz..."
-                  cd /workspace
-                  tar xf SDL2-2.26.1.tar.gz
-                  cd /build
-                  echo "✓ SDL2 descompactado"
-              else
-                  echo "✗ ERRO CRÍTICO: SDL2-2.26.1.tar.gz não encontrado!"
-                  echo "Procurando qualquer arquivo SDL2:"
-                  find /workspace -name "*SDL*" 2>/dev/null || echo "Nada encontrado"
+              cd /workspace
+              tar xf SDL2-2.26.1.tar.gz 2>/dev/null || {
+                  echo "ERRO: Não conseguiu descompactar SDL2"
+                  ls -la /workspace/ | grep SDL
                   exit 1
-              fi
+              }
+              cd /build
           fi
           
-          # Verificar se include/ existe
-          if [ ! -d "/workspace/SDL2-2.26.1/include" ]; then
-              echo "✗ ERRO: SDL2-2.26.1/include não existe após descompactar!"
-              echo "Conteúdo de SDL2-2.26.1:"
-              ls -la /workspace/SDL2-2.26.1/ || echo "Pasta não existe"
-              exit 1
-          fi
-          
-          # Verificar se SDL.h existe
+          # Verificar
           if [ ! -f "/workspace/SDL2-2.26.1/include/SDL.h" ]; then
-              echo "✗ ERRO: SDL.h não encontrado!"
-              echo "Conteúdo de include:"
-              ls -la /workspace/SDL2-2.26.1/include/ || echo "Pasta include não existe"
+              echo "ERRO: SDL.h não existe!"
+              ls -la /workspace/SDL2-2.26.1/
               exit 1
           fi
           
-          echo "✓ SDL2 OK: /workspace/SDL2-2.26.1/include/SDL.h existe"
+          echo "✓ SDL2 encontrado"
           
-          # Configurar flags
-          SDL_CFLAGS="-I/workspace/SDL2-2.26.1/include"
-          SDL_LDFLAGS="-L/workspace/miyooa30/usr/miyoo/lib -lSDL2 -lpthread -ldl -lrt"
+          # FORÇAR flags SDL2 editando o Makefile
+          echo "Modificando Makefile para incluir SDL2..."
           
-          echo "SDL_CFLAGS: $SDL_CFLAGS"
-          echo "SDL_LDFLAGS: $SDL_LDFLAGS"
+          # Adicionar SDL2 diretamente no Makefile
+          sed -i 's|^CFLAGS[[:space:]]*=|CFLAGS = -I/workspace/SDL2-2.26.1/include |' Makefile.gmloader
+          sed -i 's|^CXXFLAGS[[:space:]]*=|CXXFLAGS = -I/workspace/SDL2-2.26.1/include |' Makefile.gmloader
+          
+          # OU injetar SDL2 em TODOS os comandos de compilação
+          export CFLAGS="-I/workspace/SDL2-2.26.1/include"
+          export CXXFLAGS="-I/workspace/SDL2-2.26.1/include"
+          export LDFLAGS="-L/workspace/miyooa30/usr/miyoo/lib -lSDL2"
+          
+          echo "CFLAGS: $CFLAGS"
+          echo "CXXFLAGS: $CXXFLAGS"
+          echo "LDFLAGS: $LDFLAGS"
           echo ""
           
           echo "Compilando GMLoader..."
@@ -176,8 +165,9 @@ jobs:
               ARCH=arm-linux-gnueabihf \
               OPTM="-O2 -march=armv7-a -mtune=cortex-a7 -mfpu=neon -mfloat-abi=hard" \
               USE_FMOD=0 \
-              SDL_CFLAGS="$SDL_CFLAGS" \
-              SDL_LDFLAGS="$SDL_LDFLAGS" \
+              CFLAGS="$CFLAGS" \
+              CXXFLAGS="$CXXFLAGS" \
+              LDFLAGS="$LDFLAGS" \
               -j$(nproc) 2>&1 | tee /tmp/build.log
           
           BUILD_EXIT=${PIPESTATUS[0]}
