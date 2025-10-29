@@ -35,21 +35,15 @@ jobs:
       - name: Clone A30 Toolchain
         run: |
           git clone https://codeberg.org/hydrogen18/miyooa30 --depth=1
+          
+- name: Patch Dockerfile for 24.04
+  run: |
+    cd miyooa30/dockerbuild
+    # Forçar imagem base para Ubuntu 24.04
+    sed -i 's|^FROM .*|FROM ubuntu:24.04|' Dockerfile
 
-      - name: Patch Dockerfile for 24.04
-        run: |
-          cd miyooa30/dockerbuild
-          # Forçar imagem base para Ubuntu 24.04
-          sed -i 's|^FROM .*|FROM ubuntu:24.04|' Dockerfile
-
-          # Substituir RUN que instala pacotes para não quebrar armhf
-          sed -i '/dpkg --add-architecture armhf/,/rm -rf \/var\/lib\/apt\/lists\/*/c\
-          RUN dpkg --add-architecture armhf && \
-              apt-get update -qq && \
-              apt-get install -y --no-install-recommends build-essential scons clang sudo crossbuild-essential-armhf nano vim git curl wget unzip cmake xz-utils || true && \
-              apt-get install -y --no-install-recommends libstdc++6:armhf libglib2.0-dev:armhf libpng-dev:armhf libfreetype6-dev:armhf || true && \
-              rm -rf /var/lib/apt/lists/*
-          ' Dockerfile
+    # Substituir RUN que instala pacotes para não quebrar armhf
+    sed -i "s|dpkg --add-architecture armhf.*rm -rf /var/lib/apt/lists/\*|dpkg --add-architecture armhf && apt-get update -qq && apt-get install -y --no-install-recommends build-essential scons clang sudo crossbuild-essential-armhf nano vim git curl wget unzip cmake xz-utils || true && apt-get install -y --no-install-recommends libstdc++6:armhf libglib2.0-dev:armhf libpng-dev:armhf libfreetype6-dev:armhf || true && rm -rf /var/lib/apt/lists/*|" Dockerfile
 
       - name: Build A30 Toolchain Docker
         run: |
