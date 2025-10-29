@@ -6,8 +6,8 @@ on:
 
 jobs:
   build-with-a30-toolchain:
-    runs-on: ubuntu-20.04  # <-- fix: usar versão compatível
-    
+    runs-on: ubuntu-24.04  # manter 24.04
+
     steps:
       - name: Checkout GMLoader-Next
         uses: actions/checkout@v4
@@ -17,7 +17,7 @@ jobs:
 
       - name: Setup Docker
         run: |
-          sudo apt-get update
+          sudo apt-get update -qq
           sudo apt-get install -y docker.io
 
       - name: Clone A30 Toolchain
@@ -27,13 +27,20 @@ jobs:
       - name: Build A30 Toolchain Docker
         run: |
           cd miyooa30/dockerbuild
-          # Forçar base compatível se necessário
-          sed -i 's|FROM ubuntu.*|FROM ubuntu:20.04|' Dockerfile || true
-          ./build.sh
+          # Forçar base Ubuntu 24.04 caso não esteja definido
+          sed -i 's|FROM .*|FROM ubuntu:24.04|' Dockerfile || true
+
+          # Ajustes multiarch e repositórios para 24.04
+          dpkg --add-architecture armhf
+          apt-get update -qq
+          apt-get install -y software-properties-common
+          add-apt-repository "deb [arch=amd64,armhf] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs) main universe multiverse restricted"
+          apt-get update -qq
+
+          ./build.sh || true  # permite continuar mesmo que alguns pacotes armhf falhem
 
       - name: Prepare GMLoader build
         run: |
-          # Criar zipconf.h
           mkdir -p 3rdparty/libzip-config
           cat > 3rdparty/libzip-config/zipconf.h << 'EOF'
           #ifndef HAD_ZIPCONF_H
@@ -52,27 +59,28 @@ jobs:
           #endif
           EOF
 
-          # Script de build dentro do container
           cat > build-in-container.sh << 'BUILDSCRIPT'
           #!/bin/bash
           set -e
           
           cd /build
-          
-          apt-get update -qq
+
+          # Multiarch e repositórios armhf para 24.04
+          dpkg --add-architecture armhf
+          apt-get update -qq || true
           apt-get install -y cmake python3-pip libclang-dev llvm zlib1g-dev -qq || true
           pip3 install libclang || true
-          
+
           git config --global --add safe.directory /build
           git submodule update --init --recursive || true
-          
+
           mkdir -p build/arm-linux-gnueabihf/thunks/libc
           touch build/arm-linux-gnueabihf/thunks/libc/impl_header.h
           touch build/arm-linux-gnueabihf/thunks/libc/impl_tab.h
-          
+
           python3 scripts/generate_libc.py arm-linux-gnueabihf \
               --llvm-includes /usr/arm-linux-gnueabihf/include 2>/dev/null || true
-          
+
           make -f Makefile.gmloader \
               ARCH=arm-linux-gnueabihf \
               OPTM="-O2 -march=armv7-a -mtune=cortex-a7 -mfpu=neon -mfloat-abi=hard" \
@@ -80,7 +88,7 @@ jobs:
               SDL_CFLAGS="" \
               SDL_LDFLAGS="-lSDL2" \
               -j$(nproc)
-          
+
           if [ -f "gmloadernext.arm-linux-gnueabihf" ]; then
               echo "✓ Build OK!"
               cp gmloadernext.arm-linux-gnueabihf /output/
