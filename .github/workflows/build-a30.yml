@@ -120,39 +120,56 @@ jobs:
               echo "Warning: generate_libc falhou (usando stubs)"
           }
           
-          echo "[6/6] Compilando GMLoader..."
+          echo ""
+          echo "[6/6] Preparando SDL2 e compilando..."
           
-          # Debug: mostrar estrutura do workspace
-          echo "=== Estrutura do workspace ==="
-          ls -la /workspace/ | head -20
+          # Debug completo do workspace
+          echo "=== Conteúdo de /workspace ==="
+          ls -la /workspace/ 2>&1
           echo ""
           
-          # Debug: procurar SDL2
           echo "=== Procurando SDL2 ==="
-          find /workspace -name "SDL.h" 2>/dev/null | head -5 || echo "SDL.h não encontrado"
-          find /workspace -name "libSDL2.so*" 2>/dev/null | head -5 || echo "libSDL2.so não encontrado"
+          find /workspace -maxdepth 2 -name "SDL*" -type d 2>/dev/null || echo "Nenhuma pasta SDL encontrada"
+          find /workspace -maxdepth 3 -name "SDL.h" 2>/dev/null || echo "SDL.h não encontrado"
           echo ""
           
-          # Usar caminhos do Dockerfile do A30 (baseado no setup original)
-          SDL_CFLAGS="-I/workspace/SDL2-2.26.1/include"
-          SDL_LDFLAGS="-L/workspace/miyooa30/usr/miyoo/lib -lSDL2 -lpthread -ldl -lrt"
-          
-          echo "Usando SDL_CFLAGS: $SDL_CFLAGS"
-          echo "Usando SDL_LDFLAGS: $SDL_LDFLAGS"
+          echo "=== Procurando libSDL2 ==="
+          find /workspace -name "libSDL2*" 2>/dev/null | head -10 || echo "libSDL2 não encontrado"
           echo ""
           
-          # Verificar se o diretório existe
-          if [ ! -d "/workspace/SDL2-2.26.1/include" ]; then
-              echo "AVISO: /workspace/SDL2-2.26.1/include não existe!"
-              echo "Tentando descompactar SDL2..."
+          # Se SDL2-2.26.1 não existe, descompactar
+          if [ ! -d "/workspace/SDL2-2.26.1" ]; then
+              echo "SDL2-2.26.1 não existe, descompactando..."
               cd /workspace
               if [ -f "SDL2-2.26.1.tar.gz" ]; then
                   tar xf SDL2-2.26.1.tar.gz
-                  echo "SDL2 descompactado"
+                  echo "✓ SDL2 descompactado"
+              else
+                  echo "✗ SDL2-2.26.1.tar.gz não encontrado!"
               fi
               cd /build
+          else
+              echo "✓ SDL2-2.26.1 já existe"
           fi
           
+          # Verificar se include existe
+          if [ -d "/workspace/SDL2-2.26.1/include" ]; then
+              echo "✓ SDL2 include encontrado"
+              ls -la /workspace/SDL2-2.26.1/include/ | head -10
+          else
+              echo "✗ SDL2 include NÃO existe!"
+          fi
+          echo ""
+          
+          # Configurar flags SDL2
+          SDL_CFLAGS="-I/workspace/SDL2-2.26.1/include"
+          SDL_LDFLAGS="-L/workspace/miyooa30/usr/miyoo/lib -lSDL2 -lpthread -ldl -lrt"
+          
+          echo "SDL_CFLAGS: $SDL_CFLAGS"
+          echo "SDL_LDFLAGS: $SDL_LDFLAGS"
+          echo ""
+          
+          echo "Compilando GMLoader..."
           make -f Makefile.gmloader \
               ARCH=arm-linux-gnueabihf \
               OPTM="-O2 -march=armv7-a -mtune=cortex-a7 -mfpu=neon -mfloat-abi=hard" \
