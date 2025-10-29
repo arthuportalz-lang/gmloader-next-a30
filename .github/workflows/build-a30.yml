@@ -42,7 +42,7 @@ jobs:
           sed -i 's|FROM .*|FROM ubuntu:24.04|' Dockerfile || true
 
           # Ajustes multiarch e repositórios para 24.04
-          dpkg --add-architecture armhf
+          sudo dpkg --add-architecture armhf
           apt-get update -qq
           apt-get install -y software-properties-common
           add-apt-repository "deb [arch=amd64,armhf] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs) main universe multiverse restricted"
