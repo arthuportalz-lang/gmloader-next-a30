@@ -46,19 +46,18 @@ jobs:
           # Backup
           cp Dockerfile Dockerfile.original
           
-          # Substituir repositórios Buster por archive.debian.org
-          sed -i 's|deb.debian.org/debian|archive.debian.org/debian|g' Dockerfile
-          sed -i 's|deb.debian.org/debian-security|archive.debian.org/debian-security|g' Dockerfile
-          sed -i 's|security.debian.org|archive.debian.org/debian-security|g' Dockerfile
-          
-          # Adicionar config para aceitar repositórios antigos ANTES do primeiro apt-get
-          # Usar printf para garantir que fica em uma linha só
-          sed -i '/RUN dpkg --add-architecture armhf/i RUN echo "Acquire::Check-Valid-Until false;" > /etc/apt/apt.conf.d/99allow-old-repos' Dockerfile
+          # Adicionar comandos para corrigir sources.list DENTRO do container
+          # Inserir ANTES do primeiro apt-get update
+          sed -i '/RUN dpkg --add-architecture armhf/i \
+          # Corrigir repositórios para archive.debian.org\
+          RUN echo "deb http://archive.debian.org/debian/ buster main contrib non-free" > /etc/apt/sources.list && \\\
+              echo "deb http://archive.debian.org/debian-security buster/updates main" >> /etc/apt/sources.list && \\\
+              echo "Acquire::Check-Valid-Until false;" > /etc/apt/apt.conf.d/99no-check-valid-until' Dockerfile
           
           echo "Dockerfile corrigido!"
           echo ""
-          echo "=== Primeiras 20 linhas do Dockerfile ==="
-          head -20 Dockerfile
+          echo "=== Primeiras 30 linhas do Dockerfile ==="
+          head -30 Dockerfile
           echo ""
           echo "=== Diferenças ==="
           diff -u Dockerfile.original Dockerfile || true
