@@ -6,15 +6,15 @@ on:
 
 jobs:
   build-with-a30-toolchain:
-    runs-on: ubuntu-24.04
-
+    runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout GMLoader-Next
         uses: actions/checkout@v4
         with:
           repository: JohnnyonFlame/gmloader-next
           submodules: recursive
-
+      
       - name: Setup Docker
         run: |
           echo "Verificando instalação do Docker..."
@@ -31,29 +31,28 @@ jobs:
             sudo apt-get update -qq
             sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
           fi
-
+      
+      - name: Fix Debian Buster repositories (archived)
+        run: |
+          cd miyooa30/dockerbuild
+          # Debian Buster foi arquivado, precisa usar archive.debian.org
+          sed -i 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' Dockerfile
+          sed -i 's|http://deb.debian.org/debian-security|http://archive.debian.org/debian-security|g' Dockerfile
+          # Remover check de Release válido (arquivos antigos)
+          sed -i '/RUN dpkg --add-architecture/a RUN echo "Acquire::Check-Valid-Until \\"false\\";" > /etc/apt/apt.conf.d/99no-check-valid-until' Dockerfile
+      
       - name: Clone A30 Toolchain
         run: |
           git clone https://codeberg.org/hydrogen18/miyooa30 --depth=1
-          
-
-      - name: Patch Dockerfile for 24.04
-        run: |
-          cd miyooa30/dockerbuild
-          # Forçar imagem base para Ubuntu 24.04
-          sed -i 's|^FROM .*|FROM ubuntu:24.04|' Dockerfile
-
-          # Substituir a linha que começa com RUN dpkg --add-architecture armhf
-          sed -i '/^RUN dpkg --add-architecture armhf/c\
-            RUN dpkg --add-architecture armhf && apt-get update -qq && apt-get install -y --no-install-recommends build-essential scons clang sudo crossbuild-essential-armhf nano vim git curl wget unzip cmake xz-utils || true && apt-get install -y --no-install-recommends libstdc++6:armhf libglib2.0-dev:armhf libpng-dev:armhf libfreetype6-dev:armhf || true && rm -rf /var/lib/apt/lists/*' Dockerfile
-
+      
       - name: Build A30 Toolchain Docker
         run: |
           cd miyooa30/dockerbuild
           ./build.sh
-
+      
       - name: Prepare GMLoader build
         run: |
+          # Criar zipconf.h
           mkdir -p 3rdparty/libzip-config
           cat > 3rdparty/libzip-config/zipconf.h << 'EOF'
           #ifndef HAD_ZIPCONF_H
@@ -71,27 +70,33 @@ jobs:
           typedef uint8_t zip_uint8_t;
           #endif
           EOF
-
+          
+          # Script de build dentro do container
           cat > build-in-container.sh << 'BUILDSCRIPT'
           #!/bin/bash
           set -e
           
           cd /build
-
-          apt-get update -qq || true
+          
+          # Instalar dependências
+          apt-get update -qq
           apt-get install -y cmake python3-pip libclang-dev llvm zlib1g-dev -qq || true
           pip3 install libclang || true
-
+          
+          # Submódulos
           git config --global --add safe.directory /build
           git submodule update --init --recursive || true
-
+          
+          # Criar stubs libc se generate_libc falhar
           mkdir -p build/arm-linux-gnueabihf/thunks/libc
           touch build/arm-linux-gnueabihf/thunks/libc/impl_header.h
           touch build/arm-linux-gnueabihf/thunks/libc/impl_tab.h
-
+          
+          # Tentar gerar libc
           python3 scripts/generate_libc.py arm-linux-gnueabihf \
               --llvm-includes /usr/arm-linux-gnueabihf/include 2>/dev/null || true
-
+          
+          # Compilar com flags compatíveis com GLIBC antiga
           make -f Makefile.gmloader \
               ARCH=arm-linux-gnueabihf \
               OPTM="-O2 -march=armv7-a -mtune=cortex-a7 -mfpu=neon -mfloat-abi=hard" \
@@ -99,7 +104,8 @@ jobs:
               SDL_CFLAGS="" \
               SDL_LDFLAGS="-lSDL2" \
               -j$(nproc)
-
+          
+          # Verificar
           if [ -f "gmloadernext.arm-linux-gnueabihf" ]; then
               echo "✓ Build OK!"
               cp gmloadernext.arm-linux-gnueabihf /output/
@@ -108,9 +114,9 @@ jobs:
               exit 1
           fi
           BUILDSCRIPT
-
+          
           chmod +x build-in-container.sh
-
+      
       - name: Build with A30 Toolchain
         run: |
           mkdir -p output
@@ -119,7 +125,7 @@ jobs:
             -v $(pwd)/output:/output \
             miyooa30-toolchain \
             bash /build/build-in-container.sh
-
+      
       - name: Verify and Package
         run: |
           if [ ! -f "output/gmloadernext.arm-linux-gnueabihf" ]; then
@@ -130,12 +136,15 @@ jobs:
           echo "✓ Binário compilado com toolchain do A30!"
           ls -lh output/gmloadernext.arm-linux-gnueabihf
           
+          # Preparar pacote
           mkdir -p a30_package/lib
           cp output/gmloadernext.arm-linux-gnueabihf a30_package/gmloadernext.armhf
           chmod +x a30_package/gmloadernext.armhf
           
+          # Copiar libs redist
           cp -r lib/redist/* a30_package/lib/ 2>/dev/null || true
           
+          # Config
           cat > a30_package/gmloader.json << 'EOF'
           {
             "save_dir": "saves",
@@ -146,21 +155,29 @@ jobs:
           }
           EOF
           
+          # Script
           cat > a30_package/gmloader.sh << 'EOF'
           #!/bin/sh
           LOG="/mnt/SDCARD/Roms/PORTS/gmloader/gmloader.log"
+          
           cd /mnt/SDCARD/Roms/PORTS/gmloader
+          
           echo "=== GMLoader ===" > "$LOG"
           echo "Iniciando..." >> "$LOG"
+          
           export LD_LIBRARY_PATH=./lib:$LD_LIBRARY_PATH
+          
           ./gmloadernext.armhf -c gmloader.json >> "$LOG" 2>&1
+          
           echo "Finalizado: $?" >> "$LOG"
           EOF
           chmod +x a30_package/gmloader.sh
           
+          # README
           cat > a30_package/README.txt << 'EOF'
           GMLoader-Next for Miyoo A30
           ============================
+          
           Compilado com o toolchain OFICIAL do A30!
           Compatível com GLIBC 2.23 (do A30).
           
@@ -174,10 +191,11 @@ jobs:
           Log: gmloader.log (na pasta)
           EOF
           
+          # Tar
           cd a30_package
           tar -czf ../gmloader-a30-compatible.tar.gz *
           cd ..
-
+      
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
