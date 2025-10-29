@@ -121,12 +121,33 @@ jobs:
           }
           
           echo "[6/6] Compilando GMLoader..."
+          
+          # Descobrir onde está o SDL2 no toolchain do A30
+          SDL2_INCLUDE=$(find /workspace -name "SDL.h" -path "*/SDL2/*" -exec dirname {} \; 2>/dev/null | head -1)
+          SDL2_LIB=$(find /workspace -name "libSDL2.so*" 2>/dev/null | head -1 | xargs dirname)
+          
+          echo "SDL2 Include: $SDL2_INCLUDE"
+          echo "SDL2 Lib: $SDL2_LIB"
+          
+          # Se encontrou SDL2, adicionar aos flags
+          if [ -n "$SDL2_INCLUDE" ]; then
+            SDL_CFLAGS="-I${SDL2_INCLUDE}/.."
+            SDL_LDFLAGS="-L${SDL2_LIB} -lSDL2"
+          else
+            # Fallback: tentar caminhos conhecidos do A30
+            SDL_CFLAGS="-I/workspace/SDL2-2.26.1/include -I/workspace/miyooa30/usr/miyoo/include"
+            SDL_LDFLAGS="-L/workspace/miyooa30/usr/miyoo/lib -lSDL2"
+          fi
+          
+          echo "Usando SDL_CFLAGS: $SDL_CFLAGS"
+          echo "Usando SDL_LDFLAGS: $SDL_LDFLAGS"
+          
           make -f Makefile.gmloader \
               ARCH=arm-linux-gnueabihf \
               OPTM="-O2 -march=armv7-a -mtune=cortex-a7 -mfpu=neon -mfloat-abi=hard" \
               USE_FMOD=0 \
-              SDL_CFLAGS="" \
-              SDL_LDFLAGS="-lSDL2" \
+              SDL_CFLAGS="$SDL_CFLAGS" \
+              SDL_LDFLAGS="$SDL_LDFLAGS" \
               -j$(nproc) 2>&1 | tee /tmp/build.log
           
           BUILD_EXIT=${PIPESTATUS[0]}
