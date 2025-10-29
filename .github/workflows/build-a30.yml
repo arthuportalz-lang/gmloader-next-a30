@@ -52,12 +52,13 @@ jobs:
           sed -i 's|security.debian.org|archive.debian.org/debian-security|g' Dockerfile
           
           # Adicionar config para aceitar repositórios antigos ANTES do primeiro apt-get
-          # Procurar a primeira linha com "RUN dpkg --add-architecture"
-          sed -i '/RUN dpkg --add-architecture armhf/i \
-          # Fix para repositórios arquivados\
-          RUN echo "Acquire::Check-Valid-Until \\"false\\";\nAcquire::AllowInsecureRepositories \\"true\\";\nAcquire::AllowDowngradeToInsecureRepositories \\"true\\";" > /etc/apt/apt.conf.d/99allow-old-repos' Dockerfile
+          # Usar printf para garantir que fica em uma linha só
+          sed -i '/RUN dpkg --add-architecture armhf/i RUN echo "Acquire::Check-Valid-Until false;" > /etc/apt/apt.conf.d/99allow-old-repos' Dockerfile
           
           echo "Dockerfile corrigido!"
+          echo ""
+          echo "=== Primeiras 20 linhas do Dockerfile ==="
+          head -20 Dockerfile
           echo ""
           echo "=== Diferenças ==="
           diff -u Dockerfile.original Dockerfile || true
